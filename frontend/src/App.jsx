@@ -147,7 +147,11 @@ const CustomTooltip = ({ active, payload, label }) => {
 function AuthPage({ onLogin, theme }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({email:"",password:"",name:""});
-  const [error, setError] = useState(""); const [loading, setLoading] = useState(false);
+  const [resetForm, setResetForm] = useState({email:"",newPassword:"",confirm:""});
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(false);
+
   const handleSubmit = async (e) => {
     e.preventDefault(); setError(""); setLoading(true);
     try {
@@ -156,6 +160,21 @@ function AuthPage({ onLogin, theme }) {
     } catch(err){setError(err.response?.data?.error||"Erro ao autenticar");}
     finally{setLoading(false);}
   };
+
+  const handleReset = async (e) => {
+    e.preventDefault(); setError(""); setSuccess("");
+    if (resetForm.newPassword !== resetForm.confirm) { setError("As senhas não coincidem"); return; }
+    if (resetForm.newPassword.length < 4) { setError("Senha deve ter no mínimo 4 caracteres"); return; }
+    setLoading(true);
+    try {
+      await api.post("/api/auth/reset-password", {email:resetForm.email, newPassword:resetForm.newPassword});
+      setSuccess("✅ Senha alterada com sucesso! Faça login com a nova senha.");
+      setResetForm({email:"",newPassword:"",confirm:""});
+      setTimeout(()=>{setMode("login");setSuccess("");}, 3000);
+    } catch(err){setError(err.response?.data?.error||"Erro ao redefinir senha");}
+    finally{setLoading(false);}
+  };
+
   const t = theme==="dark" ? DARK : LIGHT;
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative" style={{background:t.bg}}>
@@ -171,23 +190,61 @@ function AuthPage({ onLogin, theme }) {
           <p className="text-sm" style={{color:t.muted}}>Inteligência financeira comportamental</p>
         </div>
         <div className="glass-card p-8 animate-fade-up stagger-1" style={{background:t.card,borderColor:t.border}}>
-          <div className="flex gap-1 rounded-xl p-1 mb-7" style={{background:theme==="dark"?"rgba(15,23,42,0.6)":"rgba(0,0,0,0.05)"}}>
-            {["login","register"].map(m=>(
-              <button key={m} onClick={()=>{setMode(m);setError("");}}
-                className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all duration-200"
-                style={{fontFamily:"Syne",background:mode===m?"linear-gradient(135deg,#22c55e,#16a34a)":"transparent",color:mode===m?"white":t.muted}}>
-                {m==="login"?"Entrar":"Cadastrar"}
+
+          {/* Mode tabs */}
+          {mode !== "reset" && (
+            <div className="flex gap-1 rounded-xl p-1 mb-7" style={{background:theme==="dark"?"rgba(15,23,42,0.6)":"rgba(0,0,0,0.05)"}}>
+              {["login","register"].map(m=>(
+                <button key={m} onClick={()=>{setMode(m);setError("");setSuccess("");}}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all duration-200"
+                  style={{fontFamily:"Syne",background:mode===m?"linear-gradient(135deg,#22c55e,#16a34a)":"transparent",color:mode===m?"white":t.muted}}>
+                  {m==="login"?"Entrar":"Cadastrar"}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Reset password header */}
+          {mode === "reset" && (
+            <div className="mb-6">
+              <button onClick={()=>{setMode("login");setError("");setSuccess("");}} className="flex items-center gap-2 text-slate-400 hover:text-white text-sm mb-4 transition-colors">
+                ← Voltar ao login
               </button>
-            ))}
-          </div>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {mode==="register"&&<div><label className="label">Nome</label><input className="input-field" placeholder="Seu nome" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></div>}
-            <div><label className="label">Email</label><input className="input-field" type="email" placeholder="seu@email.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} required/></div>
-            <div><label className="label">Senha</label><input className="input-field" type="password" placeholder="••••••••" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} required/></div>
-            {error&&<div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
-            <button type="submit" className="btn-primary w-full py-3 text-base mt-2" disabled={loading}>{loading?"Aguarde...":mode==="login"?"Entrar":"Criar conta"}</button>
-          </form>
-          
+              <h3 className="text-lg font-bold text-white" style={{fontFamily:"Syne"}}>🔑 Redefinir Senha</h3>
+              <p className="text-slate-400 text-xs mt-1">Informe seu email e crie uma nova senha</p>
+            </div>
+          )}
+
+          {/* Login / Register form */}
+          {mode !== "reset" && (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {mode==="register"&&<div><label className="label">Nome</label><input className="input-field" placeholder="Seu nome" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></div>}
+              <div><label className="label">Email</label><input className="input-field" type="email" placeholder="seu@email.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} required/></div>
+              <div><label className="label">Senha</label><input className="input-field" type="password" placeholder="••••••••" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} required/></div>
+              {error&&<div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
+              <button type="submit" className="btn-primary w-full py-3 text-base mt-2" disabled={loading}>{loading?"Aguarde...":mode==="login"?"Entrar":"Criar conta"}</button>
+              {mode==="login" && (
+                <p className="text-center text-xs mt-2">
+                  <button type="button" onClick={()=>{setMode("reset");setError("");setSuccess("");}} className="text-slate-400 hover:text-green-400 transition-colors underline underline-offset-2">
+                    Esqueci minha senha
+                  </button>
+                </p>
+              )}
+            </form>
+          )}
+
+          {/* Reset form */}
+          {mode === "reset" && (
+            <form onSubmit={handleReset} className="space-y-4">
+              <div><label className="label">Email cadastrado</label><input className="input-field" type="email" placeholder="seu@email.com" value={resetForm.email} onChange={e=>setResetForm({...resetForm,email:e.target.value})} required/></div>
+              <div><label className="label">Nova senha</label><input className="input-field" type="password" placeholder="••••••••" value={resetForm.newPassword} onChange={e=>setResetForm({...resetForm,newPassword:e.target.value})} required/></div>
+              <div><label className="label">Confirmar nova senha</label><input className="input-field" type="password" placeholder="••••••••" value={resetForm.confirm} onChange={e=>setResetForm({...resetForm,confirm:e.target.value})} required/></div>
+              {error&&<div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
+              {success&&<div className="text-green-400 text-sm bg-green-400/10 border border-green-400/20 rounded-lg p-3">{success}</div>}
+              <button type="submit" className="btn-primary w-full py-3 text-base" disabled={loading}>{loading?"Aguarde...":"Redefinir Senha"}</button>
+            </form>
+          )}
+
         </div>
       </div>
     </div>

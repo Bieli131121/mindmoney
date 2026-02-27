@@ -113,6 +113,18 @@ app.post("/api/auth/register", (req,res) => {
   res.status(201).json({token, user:{id,email,name}});
 });
 
+
+// ── Password Reset ────────────────────────────────────────────────────────────
+app.post("/api/auth/reset-password", (req,res) => {
+  const {email, newPassword} = req.body;
+  if (!email||!newPassword) return res.status(400).json({error:"Email e nova senha são obrigatórios"});
+  if (newPassword.length < 4) return res.status(400).json({error:"Senha deve ter no mínimo 4 caracteres"});
+  const user = dbGet("SELECT * FROM users WHERE email = ?", [email]);
+  if (!user) return res.status(404).json({error:"Email não encontrado"});
+  dbRun("UPDATE users SET password = ? WHERE email = ?", [newPassword, email]);
+  res.json({success:true, message:"Senha alterada com sucesso!"});
+});
+
 // ── Profile ───────────────────────────────────────────────────────────────────
 app.get("/api/profile", auth, (req,res) => {
   const user = dbGet("SELECT id,email,name FROM users WHERE id = ?", [req.user.id]);
