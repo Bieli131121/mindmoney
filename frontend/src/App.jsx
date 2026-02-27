@@ -16,7 +16,7 @@ import {
 } from "recharts";
 
 // ── Axios instance ────────────────────────────────────────────────────────────
-const api = axios.create({ baseURL: "/api" });
+const api = axios.create({ baseURL: "https://mindmoney-production.up.railway.app/api" });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("mm_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
