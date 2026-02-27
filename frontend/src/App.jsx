@@ -4,6 +4,9 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+
 
 const API_URL = import.meta.env.VITE_API_URL || "https://mindmoney-production.up.railway.app";
 
@@ -33,6 +36,170 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
   return null;
 };
+
+// ── Export PDF ────────────────────────────────────────────────────────────────
+function exportPDF(user, summary, transactions, filters) {
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+
+  // Header background
+  doc.setFillColor(10, 15, 30);
+  doc.rect(0, 0, pageW, 40, "F");
+
+  // Logo text
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(22);
+  doc.setTextColor(34, 197, 94);
+  doc.text("MindMoney", 14, 18);
+  doc.setFontSize(10);
+  doc.setTextColor(148, 163, 184);
+  doc.text("Relatório Financeiro Comportamental", 14, 26);
+
+  // Date and user
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  const now = new Date().toLocaleDateString("pt-BR", { day:"2-digit", month:"long", year:"numeric" });
+  doc.text(`Gerado em ${now}`, 14, 34);
+  doc.text(`Usuário: ${user.name} (${user.email})`, pageW - 14, 34, { align: "right" });
+
+  if (filters.startDate || filters.endDate) {
+    const period = `Período: ${filters.startDate || "início"} até ${filters.endDate || "hoje"}`;
+    doc.text(period, pageW / 2, 34, { align: "center" });
+  }
+
+  let y = 50;
+
+  // KPI Cards
+  const kpis = [
+    { label: "Saldo Total", value: summary.balance, color: summary.balance >= 0 ? [34,197,94] : [248,113,113] },
+    { label: "Total Receitas", value: summary.totalIncome, color: [34,197,94] },
+    { label: "Total Gastos", value: summary.totalExpenses, color: [248,113,113] },
+  ];
+
+  const cardW = (pageW - 28 - 8) / 3;
+  kpis.forEach((kpi, i) => {
+    const x = 14 + i * (cardW + 4);
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(x, y, cardW, 22, 3, 3, "F");
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.label.toUpperCase(), x + 4, y + 8);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(...kpi.color);
+    const val = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(kpi.value);
+    doc.text(val, x + 4, y + 17);
+    doc.setFont("helvetica", "normal");
+  });
+
+  y += 32;
+
+  // Savings rate
+  if (summary.totalIncome > 0) {
+    const rate = ((summary.totalIncome - summary.totalExpenses) / summary.totalIncome * 100).toFixed(1);
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(14, y, pageW - 28, 14, 3, 3, "F");
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Taxa de Poupança: `, 18, y + 9);
+    doc.setTextColor(34, 197, 94);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${rate}%`, 60, y + 9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    const msg = parseFloat(rate) >= 20 ? "✓ Excelente! Acima da meta de 20%." : parseFloat(rate) >= 10 ? "⚡ Pode melhorar. Meta: 20%." : "⚠ Abaixo do recomendado (20%).";
+    doc.text(msg, 80, y + 9);
+    y += 22;
+  }
+
+  // IA Insight
+  if (summary.insight) {
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(14, y, pageW - 28, 18, 3, 3, "F");
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(56, 189, 248);
+    doc.text(`${summary.insight.title}`, 18, y + 7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(148, 163, 184);
+    const lines = doc.splitTextToSize(summary.insight.message, pageW - 44);
+    doc.text(lines[0] || "", 18, y + 13);
+    y += 26;
+  }
+
+  // Gastos por categoria
+  if (summary.categoryData?.length > 0) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(255, 255, 255);
+    doc.text("Gastos por Categoria", 14, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Categoria", "Valor Gasto", "% do Total"]],
+      body: summary.categoryData.map(cat => [
+        cat.name,
+        new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cat.value),
+        summary.totalExpenses > 0 ? ((cat.value / summary.totalExpenses) * 100).toFixed(1) + "%" : "0%",
+      ]),
+      styles: { fontSize: 9, cellPadding: 4, fillColor: [15, 23, 42], textColor: [226, 232, 240] },
+      headStyles: { fillColor: [34, 197, 94], textColor: [10, 15, 30], fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [20, 30, 50] },
+      margin: { left: 14, right: 14 },
+    });
+    y = doc.lastAutoTable.finalY + 12;
+  }
+
+  // Transações
+  if (transactions?.length > 0) {
+    if (y > 220) { doc.addPage(); y = 20; }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(255, 255, 255);
+    doc.text("Extrato de Transações", 14, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Data", "Descrição", "Categoria", "Tipo", "Valor"]],
+      body: transactions.map(tx => [
+        new Date(tx.date + "T00:00:00").toLocaleDateString("pt-BR"),
+        tx.description || tx.category,
+        tx.category,
+        tx.type === "income" ? "Receita" : "Gasto",
+        (tx.type === "income" ? "+" : "-") + new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(tx.amount),
+      ]),
+      styles: { fontSize: 8, cellPadding: 3, fillColor: [15, 23, 42], textColor: [226, 232, 240] },
+      headStyles: { fillColor: [30, 41, 59], textColor: [148, 163, 184], fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [20, 30, 50] },
+      columnStyles: {
+        4: { halign: "right" },
+      },
+      didParseCell: (data) => {
+        if (data.column.index === 4 && data.section === "body") {
+          const val = data.cell.raw || "";
+          data.cell.styles.textColor = val.startsWith("+") ? [34,197,94] : [248,113,113];
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+  }
+
+  // Footer
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(7);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`MindMoney — Relatório gerado automaticamente`, 14, doc.internal.pageSize.getHeight() - 8);
+    doc.text(`Página ${i} de ${pageCount}`, pageW - 14, doc.internal.pageSize.getHeight() - 8, { align: "right" });
+  }
+
+  const fileName = `mindmoney-relatorio-${new Date().toISOString().split("T")[0]}.pdf`;
+  doc.save(fileName);
+}
+
 
 // ── Auth Page ─────────────────────────────────────────────────────────────────
 function AuthPage({ onLogin }) {
@@ -571,9 +738,20 @@ export default function App() {
           {/* ── DASHBOARD ── */}
           {activeTab==="dashboard" && (
             <div className="pb-20 md:pb-0">
-              <div className="mb-5 animate-fade-up">
-                <p className="text-slate-400 text-sm mb-0.5">Bem-vindo de volta,</p>
-                <h1 className="text-2xl font-bold text-white">{user.name} 👋</h1>
+              <div className="flex items-start justify-between mb-5 animate-fade-up">
+                <div>
+                  <p className="text-slate-400 text-sm mb-0.5">Bem-vindo de volta,</p>
+                  <h1 className="text-2xl font-bold text-white">{user.name} 👋</h1>
+                </div>
+                {summary && (
+                  <button
+                    onClick={() => exportPDF(user, summary, transactions, filters)}
+                    className="btn-ghost flex items-center gap-2 text-sm"
+                    title="Exportar relatório PDF"
+                  >
+                    <span>📤</span> Exportar PDF
+                  </button>
+                )}
               </div>
               <PeriodFilter filters={filters} onChange={setFilters}/>
               {loadingData ? (
@@ -646,7 +824,14 @@ export default function App() {
             <div className="pb-20 md:pb-0">
               <div className="flex items-center justify-between mb-5 animate-fade-up">
                 <div><h1 className="text-2xl font-bold text-white">Transações</h1><p className="text-slate-400 text-sm mt-0.5">{transactions.length} registros</p></div>
-                <button className="btn-primary hidden md:flex items-center gap-2" onClick={()=>setShowModal(true)}><span className="text-lg leading-none">+</span> Adicionar</button>
+                <div className="hidden md:flex items-center gap-2">
+                  {summary && transactions.length > 0 && (
+                    <button onClick={() => exportPDF(user, summary, transactions, filters)} className="btn-ghost flex items-center gap-2 text-sm">
+                      <span>📤</span> PDF
+                    </button>
+                  )}
+                  <button className="btn-primary flex items-center gap-2" onClick={()=>setShowModal(true)}><span className="text-lg leading-none">+</span> Adicionar</button>
+                </div>
               </div>
               <PeriodFilter filters={filters} onChange={setFilters}/>
               {loadingData ? (
