@@ -33,6 +33,8 @@ async function initDb() {
   db.run(`CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, title TEXT NOT NULL, target_amount REAL NOT NULL, current_amount REAL NOT NULL DEFAULT 0, category TEXT, deadline TEXT, created_at TEXT DEFAULT (datetime('now')));`);
   db.run(`CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, limit_amount REAL NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, color TEXT DEFAULT '#818cf8', created_at TEXT DEFAULT (datetime('now')));`);
   db.run(`CREATE TABLE IF NOT EXISTS card_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, card_id INTEGER NOT NULL, amount REAL NOT NULL, category TEXT NOT NULL, description TEXT, date TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')));`);
+  db.run(`CREATE TABLE IF NOT EXISTS custom_categories (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, color TEXT DEFAULT '#94a3b8', type TEXT NOT NULL DEFAULT 'expense', created_at TEXT DEFAULT (datetime('now')));`);
+  db.run(`CREATE TABLE IF NOT EXISTS recurring_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount REAL NOT NULL, category TEXT NOT NULL, description TEXT, type TEXT NOT NULL, frequency TEXT NOT NULL, next_date TEXT NOT NULL, active INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')));`);
   db.run(`CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT DEFAULT (datetime('now')));`);
 
   const existing = db.exec("SELECT id FROM users WHERE email = 'demo@mindmoney.com'");
@@ -300,6 +302,66 @@ app.delete("/api/cards/:cardId/transactions/:id", auth, (req,res) => {
   if (!card) return res.status(404).json({error:"Cartão não encontrado"});
   dbRun("DELETE FROM card_transactions WHERE id = ? AND card_id = ?", [req.params.id, req.params.cardId]);
   res.json({success:true});
+});
+
+
+// ── Custom Categories ─────────────────────────────────────────────────────────
+app.get("/api/categories", auth, (req,res) => {
+  const custom = dbAll("SELECT * FROM custom_categories WHERE user_id = ? ORDER BY name", [req.user.id]);
+  res.json(custom);
+});
+app.post("/api/categories", auth, (req,res) => {
+  const {name, color, type} = req.body;
+  if (!name||!type) return res.status(400).json({error:"Nome e tipo são obrigatórios"});
+  if (dbGet("SELECT id FROM custom_categories WHERE user_id=? AND name=? AND type=?", [req.user.id,name,type]))
+    return res.status(409).json({error:"Categoria já existe"});
+  const id = dbRun("INSERT INTO custom_categories (user_id,name,color,type) VALUES (?,?,?,?)",
+    [req.user.id, name, color||"#94a3b8", type]);
+  res.status(201).json(dbGet("SELECT * FROM custom_categories WHERE id=?", [id]));
+});
+app.delete("/api/categories/:id", auth, (req,res) => {
+  if (!dbGet("SELECT id FROM custom_categories WHERE id=? AND user_id=?", [req.params.id, req.user.id]))
+    return res.status(404).json({error:"Categoria não encontrada"});
+  dbRun("DELETE FROM custom_categories WHERE id=?", [req.params.id]);
+  res.json({success:true});
+});
+
+// ── Recurring Transactions ────────────────────────────────────────────────────
+app.get("/api/recurring", auth, (req,res) => {
+  res.json(dbAll("SELECT * FROM recurring_transactions WHERE user_id=? ORDER BY created_at DESC", [req.user.id]));
+});
+app.post("/api/recurring", auth, (req,res) => {
+  const {amount,category,description,type,frequency,next_date} = req.body;
+  if (!amount||!category||!type||!frequency||!next_date) return res.status(400).json({error:"Campos obrigatórios faltando"});
+  const id = dbRun("INSERT INTO recurring_transactions (user_id,amount,category,description,type,frequency,next_date) VALUES (?,?,?,?,?,?,?)",
+    [req.user.id, parseFloat(amount), category, description||"", type, frequency, next_date]);
+  res.status(201).json(dbGet("SELECT * FROM recurring_transactions WHERE id=?", [id]));
+});
+app.delete("/api/recurring/:id", auth, (req,res) => {
+  if (!dbGet("SELECT id FROM recurring_transactions WHERE id=? AND user_id=?", [req.params.id, req.user.id]))
+    return res.status(404).json({error:"Não encontrado"});
+  dbRun("DELETE FROM recurring_transactions WHERE id=?", [req.params.id]);
+  res.json({success:true});
+});
+
+// ── Monthly Comparison ────────────────────────────────────────────────────────
+app.get("/api/comparison", auth, (req,res) => {
+  const txs = dbAll("SELECT * FROM transactions WHERE user_id=? ORDER BY date ASC", [req.user.id]);
+  const months = {};
+  txs.forEach(t => {
+    const m = t.date.substring(0,7);
+    if (!months[m]) months[m] = {income:0, expense:0};
+    months[m][t.type] += t.amount;
+  });
+  const result = Object.entries(months).sort(([a],[b])=>a.localeCompare(b)).slice(-6).map(([m,d]) => ({
+    month: m,
+    label: new Date(m+"-01").toLocaleDateString("pt-BR",{month:"short",year:"2-digit"}),
+    income: d.income,
+    expense: d.expense,
+    balance: d.income - d.expense,
+    savingsRate: d.income > 0 ? ((d.income-d.expense)/d.income*100).toFixed(1) : "0.0"
+  }));
+  res.json(result);
 });
 
 initDb().then(() => app.listen(PORT, () => console.log(`✅ MindMoney API rodando em http://localhost:${PORT}`)));

@@ -477,6 +477,296 @@ function ProfileTab({ user, onUpdate, onLogout, theme, onThemeToggle }) {
 }
 
 
+
+// ── Recurring Tab ─────────────────────────────────────────────────────────────
+function RecurringTab({ allCategories }) {
+  const [items, setItems] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({amount:"",category:"Alimentação",description:"",type:"expense",frequency:"monthly",next_date:new Date().toISOString().split("T")[0]});
+
+  useEffect(() => { api.get("/api/recurring").then(r=>setItems(r.data)).catch(()=>{}); }, []);
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    const {data} = await api.post("/api/recurring", form);
+    setItems(p=>[data,...p]);
+    setShowForm(false);
+    setForm({amount:"",category:"Alimentação",description:"",type:"expense",frequency:"monthly",next_date:new Date().toISOString().split("T")[0]});
+  };
+
+  const handleDelete = async (id) => {
+    await api.delete(`/api/recurring/${id}`);
+    setItems(p=>p.filter(r=>r.id!==id));
+  };
+
+  const freqLabel = {daily:"Diário",weekly:"Semanal",monthly:"Mensal",yearly:"Anual"};
+  const expCats = [...EXPENSE_CATEGORIES, ...allCategories.filter(c=>c.type==="expense").map(c=>c.name)];
+  const incCats = [...INCOME_CATEGORIES, ...allCategories.filter(c=>c.type==="income").map(c=>c.name)];
+
+  return (
+    <div className="pb-20 md:pb-0">
+      <div className="flex items-center justify-between mb-6 animate-fade-up">
+        <div><h1 className="text-2xl font-bold text-white">📆 Recorrentes</h1><p className="text-slate-400 text-sm mt-0.5">{items.length} transação(ões) automática(s)</p></div>
+        <button className="btn-primary flex items-center gap-2" onClick={()=>setShowForm(!showForm)}><span className="text-lg leading-none">+</span> Nova</button>
+      </div>
+      {showForm && (
+        <div className="glass-card p-5 mb-5 animate-fade-up">
+          <h3 className="font-bold text-white mb-4">Nova Transação Recorrente</h3>
+          <form onSubmit={handleAdd} className="space-y-3">
+            <div className="flex gap-2">
+              {["expense","income"].map(t=>(
+                <button key={t} type="button" onClick={()=>setForm({...form,type:t,category:t==="expense"?"Alimentação":"Salário"})}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all border"
+                  style={{fontFamily:"Syne",background:form.type===t?(t==="expense"?"rgba(248,113,113,0.15)":"rgba(74,222,128,0.15)"):"transparent",borderColor:form.type===t?(t==="expense"?"rgba(248,113,113,0.5)":"rgba(74,222,128,0.5)"):"rgba(148,163,184,0.15)",color:form.type===t?(t==="expense"?"#f87171":"#4ade80"):"#64748b"}}>
+                  {t==="expense"?"💸 Gasto":"💰 Receita"}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Valor (R$)</label><input className="input-field" type="number" step="0.01" min="0.01" placeholder="0,00" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} required/></div>
+              <div><label className="label">Frequência</label>
+                <select className="input-field" value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}>
+                  <option value="daily">Diário</option>
+                  <option value="weekly">Semanal</option>
+                  <option value="monthly">Mensal</option>
+                  <option value="yearly">Anual</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Categoria</label>
+                <select className="input-field" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>
+                  {(form.type==="expense"?expCats:incCats).map(c=><option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div><label className="label">Próxima data</label><input className="input-field" type="date" value={form.next_date} onChange={e=>setForm({...form,next_date:e.target.value})} required/></div>
+            </div>
+            <div><label className="label">Descrição</label><input className="input-field" placeholder="Ex: Netflix, Aluguel..." value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div>
+            <div className="flex gap-3">
+              <button type="button" className="btn-ghost flex-1" onClick={()=>setShowForm(false)}>Cancelar</button>
+              <button type="submit" className="btn-primary flex-1">Criar</button>
+            </div>
+          </form>
+        </div>
+      )}
+      {items.length===0?(
+        <div className="glass-card p-10 text-center animate-fade-up"><p className="text-4xl mb-3">📆</p><p className="text-white font-semibold">Nenhuma recorrência</p><p className="text-slate-400 text-sm mt-1">Cadastre salário, aluguel, assinaturas...</p></div>
+      ):(
+        <div className="space-y-3 animate-fade-up">
+          {items.map(item=>(
+            <div key={item.id} className="glass-card glass-card-hover p-4 flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{background:`${CATEGORY_COLORS[item.category]||"#94a3b8"}20`}}>{item.type==="income"?"💰":"💸"}</div>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-medium text-sm">{item.description||item.category}</p>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="tag" style={{background:`${CATEGORY_COLORS[item.category]||"#94a3b8"}20`,color:CATEGORY_COLORS[item.category]||"#94a3b8"}}>{item.category}</span>
+                  <span className="tag" style={{background:"rgba(56,189,248,0.1)",color:"#38bdf8"}}>{freqLabel[item.frequency]}</span>
+                  <span className="text-xs text-slate-500">Próx: {new Date(item.next_date+"T00:00:00").toLocaleDateString("pt-BR")}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <p className="font-bold" style={{fontFamily:"Syne",color:item.type==="income"?"#4ade80":"#f87171"}}>{item.type==="income"?"+":"-"}{fmt(item.amount)}</p>
+                <button onClick={()=>handleDelete(item.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-600 hover:text-red-400 hover:bg-red-400/10 transition-colors text-sm">✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Categories Tab ────────────────────────────────────────────────────────────
+function CategoriesTab({ onUpdate }) {
+  const [categories, setCategories] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({name:"",color:"#94a3b8",type:"expense"});
+  const [error, setError] = useState("");
+  const COLORS = ["#818cf8","#f472b6","#fb923c","#34d399","#38bdf8","#fbbf24","#a78bfa","#f87171","#94a3b8","#4ade80"];
+
+  useEffect(() => { api.get("/api/categories").then(r=>setCategories(r.data)).catch(()=>{}); }, []);
+
+  const handleAdd = async (e) => {
+    e.preventDefault(); setError("");
+    try {
+      const {data} = await api.post("/api/categories", form);
+      setCategories(p=>[...p,data]);
+      setShowForm(false);
+      setForm({name:"",color:"#94a3b8",type:"expense"});
+      if (onUpdate) onUpdate([...categories, data]);
+    } catch(err) { setError(err.response?.data?.error||"Erro ao criar"); }
+  };
+
+  const handleDelete = async (id) => {
+    await api.delete(`/api/categories/${id}`);
+    const updated = categories.filter(c=>c.id!==id);
+    setCategories(updated);
+    if (onUpdate) onUpdate(updated);
+  };
+
+  const expCats = categories.filter(c=>c.type==="expense");
+  const incCats = categories.filter(c=>c.type==="income");
+
+  return (
+    <div className="pb-20 md:pb-0">
+      <div className="flex items-center justify-between mb-6 animate-fade-up">
+        <div><h1 className="text-2xl font-bold text-white">🏷️ Categorias</h1><p className="text-slate-400 text-sm mt-0.5">Personalize suas categorias</p></div>
+        <button className="btn-primary flex items-center gap-2" onClick={()=>setShowForm(!showForm)}><span className="text-lg leading-none">+</span> Nova</button>
+      </div>
+      {showForm && (
+        <div className="glass-card p-5 mb-5 animate-fade-up">
+          <form onSubmit={handleAdd} className="space-y-3">
+            <div className="flex gap-2">
+              {["expense","income"].map(t=>(
+                <button key={t} type="button" onClick={()=>setForm({...form,type:t})}
+                  className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all border"
+                  style={{fontFamily:"Syne",background:form.type===t?(t==="expense"?"rgba(248,113,113,0.15)":"rgba(74,222,128,0.15)"):"transparent",borderColor:form.type===t?(t==="expense"?"rgba(248,113,113,0.5)":"rgba(74,222,128,0.5)"):"rgba(148,163,184,0.15)",color:form.type===t?(t==="expense"?"#f87171":"#4ade80"):"#64748b"}}>
+                  {t==="expense"?"💸 Gasto":"💰 Receita"}
+                </button>
+              ))}
+            </div>
+            <div><label className="label">Nome da categoria</label><input className="input-field" placeholder="Ex: Pets, Viagem..." value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></div>
+            <div><label className="label">Cor</label>
+              <div className="flex gap-2 mt-1 flex-wrap">
+                {COLORS.map(c=>(
+                  <button key={c} type="button" onClick={()=>setForm({...form,color:c})}
+                    className="w-7 h-7 rounded-full transition-all"
+                    style={{background:c,outline:form.color===c?"3px solid white":"none",outlineOffset:"2px"}}/>
+                ))}
+              </div>
+            </div>
+            {error && <p className="text-red-400 text-sm">{error}</p>}
+            <div className="flex gap-3">
+              <button type="button" className="btn-ghost flex-1" onClick={()=>setShowForm(false)}>Cancelar</button>
+              <button type="submit" className="btn-primary flex-1">Criar</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {[{title:"💸 Gastos",items:expCats},{title:"💰 Receitas",items:incCats}].map(group=>(
+          <div key={group.title} className="glass-card p-5 animate-fade-up">
+            <h3 className="font-bold text-white mb-4 text-sm">{group.title} — Personalizadas</h3>
+            {group.items.length===0?(
+              <p className="text-slate-500 text-sm text-center py-4">Nenhuma categoria personalizada ainda</p>
+            ):(
+              <div className="space-y-2">
+                {group.items.map(cat=>(
+                  <div key={cat.id} className="flex items-center justify-between p-3 rounded-xl" style={{background:"rgba(255,255,255,0.03)"}}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-full flex-shrink-0" style={{background:cat.color}}/>
+                      <span className="text-white text-sm font-medium">{cat.name}</span>
+                    </div>
+                    <button onClick={()=>handleDelete(cat.id)} className="w-6 h-6 rounded flex items-center justify-center text-slate-600 hover:text-red-400 transition-colors text-xs">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="glass-card p-5 mt-4 animate-fade-up">
+        <h3 className="font-bold text-white mb-4 text-sm">📋 Categorias Padrão</h3>
+        <div className="flex flex-wrap gap-2">
+          {[...EXPENSE_CATEGORIES,...INCOME_CATEGORIES].map(c=>(
+            <span key={c} className="tag px-3 py-1.5" style={{background:`${CATEGORY_COLORS[c]||"#94a3b8"}20`,color:CATEGORY_COLORS[c]||"#94a3b8"}}>{c}</span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Comparison Tab ────────────────────────────────────────────────────────────
+function ComparisonTab() {
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get("/api/comparison").then(r=>{setData(r.data);setLoading(false);}).catch(()=>setLoading(false));
+  }, []);
+
+  if (loading) return <div className="glass-card p-10 text-center"><p className="text-slate-400">Carregando...</p></div>;
+  if (!data.length) return <div className="glass-card p-10 text-center"><p className="text-4xl mb-3">📊</p><p className="text-white font-semibold">Sem dados suficientes</p><p className="text-slate-400 text-sm mt-1">Adicione transações para ver o comparativo</p></div>;
+
+  const best = [...data].sort((a,b)=>parseFloat(b.savingsRate)-parseFloat(a.savingsRate))[0];
+  const worst = [...data].sort((a,b)=>parseFloat(a.savingsRate)-parseFloat(b.savingsRate))[0];
+
+  return (
+    <div className="pb-20 md:pb-0">
+      <div className="mb-6 animate-fade-up">
+        <h1 className="text-2xl font-bold text-white">📊 Comparativo Mensal</h1>
+        <p className="text-slate-400 text-sm mt-0.5">Evolução dos últimos 6 meses</p>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 gap-3 mb-5 animate-fade-up">
+        <div className="glass-card p-4" style={{borderColor:"rgba(74,222,128,0.2)"}}>
+          <p className="text-xs text-slate-500 mb-1">🏆 Melhor mês</p>
+          <p className="font-bold text-green-400" style={{fontFamily:"Syne"}}>{best.label}</p>
+          <p className="text-xs text-slate-400 mt-0.5">Poupança: {best.savingsRate}%</p>
+        </div>
+        <div className="glass-card p-4" style={{borderColor:"rgba(248,113,113,0.2)"}}>
+          <p className="text-xs text-slate-500 mb-1">📉 Mês mais difícil</p>
+          <p className="font-bold text-red-400" style={{fontFamily:"Syne"}}>{worst.label}</p>
+          <p className="text-xs text-slate-400 mt-0.5">Poupança: {worst.savingsRate}%</p>
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div className="glass-card p-5 mb-5 animate-fade-up stagger-2">
+        <h3 className="font-bold text-white mb-4 text-sm">Receitas vs Gastos</h3>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={data} barGap={4} barSize={20}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false}/>
+            <XAxis dataKey="label" tick={{fill:"#475569",fontSize:11}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fill:"#475569",fontSize:11}} axisLine={false} tickLine={false} tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`}/>
+            <Tooltip content={({active,payload,label})=>{
+              if(active&&payload?.length) return (
+                <div className="glass-card p-3 text-xs" style={{minWidth:160}}>
+                  <p className="text-slate-300 font-semibold mb-2">{label}</p>
+                  {payload.map((p,i)=><p key={i} style={{color:p.color}}>{p.name}: {fmt(p.value)}</p>)}
+                </div>
+              ); return null;
+            }}/>
+            <Bar dataKey="income" name="Receitas" fill="#4ade80" radius={[4,4,0,0]}/>
+            <Bar dataKey="expense" name="Gastos" fill="#f87171" radius={[4,4,0,0]}/>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Monthly table */}
+      <div className="glass-card p-5 animate-fade-up stagger-3">
+        <h3 className="font-bold text-white mb-4 text-sm">Detalhamento Mensal</h3>
+        <div className="space-y-3">
+          {data.slice().reverse().map((m,i)=>{
+            const balance = m.income - m.expense;
+            const rate = parseFloat(m.savingsRate);
+            return (
+              <div key={i} className="p-4 rounded-xl border" style={{background:"rgba(255,255,255,0.03)",borderColor:"rgba(255,255,255,0.06)"}}>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="font-bold text-white" style={{fontFamily:"Syne"}}>{m.label}</p>
+                  <span className="text-xs px-2 py-1 rounded-lg font-semibold" style={{background:rate>=20?"rgba(74,222,128,0.15)":rate>=10?"rgba(251,191,36,0.15)":"rgba(248,113,113,0.15)",color:rate>=20?"#4ade80":rate>=10?"#fbbf24":"#f87171"}}>{rate}% poupado</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div><p className="text-slate-500">Receitas</p><p className="text-green-400 font-semibold mt-0.5">{fmt(m.income)}</p></div>
+                  <div><p className="text-slate-500">Gastos</p><p className="text-red-400 font-semibold mt-0.5">{fmt(m.expense)}</p></div>
+                  <div><p className="text-slate-500">Saldo</p><p className="font-semibold mt-0.5" style={{color:balance>=0?"#4ade80":"#f87171"}}>{fmt(balance)}</p></div>
+                </div>
+                <div className="mt-2 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{width:`${Math.min(rate,100)}%`,background:rate>=20?"#4ade80":rate>=10?"#fbbf24":"#f87171"}}/>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Cards Tab ─────────────────────────────────────────────────────────────────
 const CARD_COLORS = ["#818cf8","#f472b6","#fb923c","#34d399","#38bdf8","#fbbf24","#a78bfa","#f87171"];
 
@@ -845,6 +1135,9 @@ export default function App() {
   const [filters,setFilters]=useState({startDate:"",endDate:"",preset:"all"});
   const [search,setSearch]=useState("");
   const [editingTx,setEditingTx]=useState(null);
+  const [customCategories,setCustomCategories]=useState([]);
+
+  useEffect(()=>{ if(user) api.get("/api/categories").then(r=>setCustomCategories(r.data)).catch(()=>{}); },[user]);
   const [theme,setTheme]=useState(()=>localStorage.getItem("mm_theme")||"dark");
   const [notifications,setNotifications]=useState([]);
 
@@ -903,6 +1196,9 @@ export default function App() {
     {id:"dashboard",icon:"◈",label:"Dashboard"},
     {id:"transactions",icon:"⟳",label:"Transações"},
     {id:"cards",icon:"💳",label:"Cartões"},
+    {id:"recurring",icon:"📆",label:"Recorrentes"},
+    {id:"comparison",icon:"📊",label:"Comparativo"},
+    {id:"categories",icon:"🏷️",label:"Categorias"},
     {id:"goals",icon:"🎯",label:"Metas"},
     {id:"alerts",icon:"🔔",label:"Alertas"},
     {id:"insights",icon:"◎",label:"Insights"},
@@ -1067,6 +1363,9 @@ export default function App() {
           )}
 
           {activeTab==="cards"&&<CardsTab/>}
+          {activeTab==="recurring"&&<RecurringTab allCategories={customCategories}/>}
+          {activeTab==="comparison"&&<ComparisonTab/>}
+          {activeTab==="categories"&&<CategoriesTab onUpdate={setCustomCategories}/>}
           {activeTab==="goals"&&<GoalsTab/>}
           {activeTab==="alerts"&&<AlertsTab summary={summary}/>}
 
