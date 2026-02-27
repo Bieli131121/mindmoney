@@ -146,7 +146,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 // ── Auth Page ─────────────────────────────────────────────────────────────────
 function AuthPage({ onLogin, theme }) {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({email:"demo@mindmoney.com",password:"demo123",name:""});
+  const [form, setForm] = useState({email:"",password:"",name:""});
   const [error, setError] = useState(""); const [loading, setLoading] = useState(false);
   const handleSubmit = async (e) => {
     e.preventDefault(); setError(""); setLoading(true);
@@ -187,7 +187,7 @@ function AuthPage({ onLogin, theme }) {
             {error&&<div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
             <button type="submit" className="btn-primary w-full py-3 text-base mt-2" disabled={loading}>{loading?"Aguarde...":mode==="login"?"Entrar":"Criar conta"}</button>
           </form>
-          {mode==="login"&&<p className="text-center text-xs mt-5" style={{color:t.muted}}>Demo: <span style={{color:t.text}}>demo@mindmoney.com / demo123</span></p>}
+          
         </div>
       </div>
     </div>
