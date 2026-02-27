@@ -56,9 +56,7 @@ async function initDb() {
       [uid,890,"Moradia","Aluguel","2024-03-10","expense"],
       [uid,280,"Alimentação","Supermercado","2024-03-15","expense"],
       [uid,120,"Transporte","Uber","2024-03-18","expense"],
-    ].forEach(s => {
-      db.run(`INSERT INTO transactions (user_id,amount,category,description,date,type) VALUES (${s[0]},${s[1]},'${s[2]}','${s[3]}','${s[4]}','${s[5]}')`);
-    });
+    ].forEach(s => db.run(`INSERT INTO transactions (user_id,amount,category,description,date,type) VALUES (${s[0]},${s[1]},'${s[2]}','${s[3]}','${s[4]}','${s[5]}')`));
   }
   saveDb();
 }
@@ -111,7 +109,34 @@ app.post("/api/auth/register", (req,res) => {
   res.status(201).json({token, user:{id,email,name}});
 });
 
-// ── Transactions (com filtro por período) ─────────────────────────────────────
+// ── Profile ───────────────────────────────────────────────────────────────────
+app.get("/api/profile", auth, (req,res) => {
+  const user = dbGet("SELECT id,email,name FROM users WHERE id = ?", [req.user.id]);
+  if (!user) return res.status(404).json({error:"Usuário não encontrado"});
+  res.json(user);
+});
+
+app.patch("/api/profile", auth, (req,res) => {
+  const {name, currentPassword, newPassword} = req.body;
+  const user = dbGet("SELECT * FROM users WHERE id = ?", [req.user.id]);
+  if (!user) return res.status(404).json({error:"Usuário não encontrado"});
+
+  if (name) {
+    dbRun("UPDATE users SET name = ? WHERE id = ?", [name, req.user.id]);
+  }
+
+  if (newPassword) {
+    if (!currentPassword) return res.status(400).json({error:"Senha atual é obrigatória"});
+    if (user.password !== currentPassword) return res.status(401).json({error:"Senha atual incorreta"});
+    dbRun("UPDATE users SET password = ? WHERE id = ?", [newPassword, req.user.id]);
+  }
+
+  const updated = dbGet("SELECT id,email,name FROM users WHERE id = ?", [req.user.id]);
+  const token = jwt.sign({id:updated.id,email:updated.email,name:updated.name}, JWT_SECRET, {expiresIn:"7d"});
+  res.json({user:updated, token});
+});
+
+// ── Transactions ──────────────────────────────────────────────────────────────
 app.get("/api/transactions", auth, (req,res) => {
   const { startDate, endDate, type, category } = req.query;
   let sql = "SELECT * FROM transactions WHERE user_id = ?";
@@ -139,14 +164,13 @@ app.delete("/api/transactions/:id", auth, (req,res) => {
   res.json({success:true});
 });
 
-// ── Summary (com filtro por período) ─────────────────────────────────────────
+// ── Summary ───────────────────────────────────────────────────────────────────
 app.get("/api/summary", auth, (req,res) => {
   const { startDate, endDate } = req.query;
   let sql = "SELECT * FROM transactions WHERE user_id = ?";
   const params = [req.user.id];
   if (startDate) { sql += " AND date >= ?"; params.push(startDate); }
   if (endDate)   { sql += " AND date <= ?"; params.push(endDate); }
-
   const txs = dbAll(sql, params);
   const totalIncome   = txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
   const totalExpenses = txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
@@ -174,7 +198,6 @@ app.get("/api/summary", auth, (req,res) => {
 app.get("/api/goals", auth, (req,res) => {
   res.json(dbAll("SELECT * FROM goals WHERE user_id = ? ORDER BY created_at DESC", [req.user.id]));
 });
-
 app.post("/api/goals", auth, (req,res) => {
   const {title,target_amount,category,deadline} = req.body;
   if (!title||!target_amount) return res.status(400).json({error:"Título e valor são obrigatórios"});
@@ -182,7 +205,6 @@ app.post("/api/goals", auth, (req,res) => {
     [req.user.id,parseFloat(target_amount),title,category||"",deadline||""]);
   res.status(201).json(dbGet("SELECT * FROM goals WHERE id = ?", [id]));
 });
-
 app.patch("/api/goals/:id", auth, (req,res) => {
   const {current_amount} = req.body;
   if (!dbGet("SELECT id FROM goals WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
@@ -190,7 +212,6 @@ app.patch("/api/goals/:id", auth, (req,res) => {
   dbRun("UPDATE goals SET current_amount = ? WHERE id = ?", [parseFloat(current_amount),req.params.id]);
   res.json(dbGet("SELECT * FROM goals WHERE id = ?", [req.params.id]));
 });
-
 app.delete("/api/goals/:id", auth, (req,res) => {
   if (!dbGet("SELECT id FROM goals WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
     return res.status(404).json({error:"Meta não encontrada"});
@@ -202,7 +223,6 @@ app.delete("/api/goals/:id", auth, (req,res) => {
 app.get("/api/alerts", auth, (req,res) => {
   res.json(dbAll("SELECT * FROM alerts WHERE user_id = ? ORDER BY created_at DESC", [req.user.id]));
 });
-
 app.post("/api/alerts", auth, (req,res) => {
   const {category,limit_amount} = req.body;
   if (!category||!limit_amount) return res.status(400).json({error:"Categoria e limite são obrigatórios"});
@@ -210,7 +230,6 @@ app.post("/api/alerts", auth, (req,res) => {
     [req.user.id,category,parseFloat(limit_amount)]);
   res.status(201).json(dbGet("SELECT * FROM alerts WHERE id = ?", [id]));
 });
-
 app.delete("/api/alerts/:id", auth, (req,res) => {
   if (!dbGet("SELECT id FROM alerts WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
     return res.status(404).json({error:"Alerta não encontrado"});

@@ -7,9 +7,7 @@ import {
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-
 const API_URL = import.meta.env.VITE_API_URL || "https://mindmoney-production.up.railway.app";
-
 const api = axios.create({ baseURL: API_URL });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("mm_token");
@@ -20,206 +18,147 @@ api.interceptors.request.use((config) => {
 const fmt = (n) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);
 
 const CATEGORY_COLORS = {
-  Moradia: "#818cf8", Alimentação: "#fb923c", Transporte: "#38bdf8",
-  Lazer: "#f472b6", Saúde: "#34d399", Educação: "#fbbf24",
-  Salário: "#4ade80", Freelance: "#a78bfa", Outros: "#94a3b8",
+  Moradia:"#818cf8", Alimentação:"#fb923c", Transporte:"#38bdf8",
+  Lazer:"#f472b6", Saúde:"#34d399", Educação:"#fbbf24",
+  Salário:"#4ade80", Freelance:"#a78bfa", Outros:"#94a3b8",
 };
 const EXPENSE_CATEGORIES = ["Moradia","Alimentação","Transporte","Lazer","Saúde","Educação","Outros"];
 const INCOME_CATEGORIES  = ["Salário","Freelance","Outros"];
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const DARK = {
+  bg: "#050810", card: "rgba(15,23,42,0.7)", border: "rgba(74,222,128,0.1)",
+  text: "#e2e8f0", muted: "#64748b", sidebar: "rgba(5,8,16,0.95)",
+};
+const LIGHT = {
+  bg: "#f0fdf4", card: "rgba(255,255,255,0.9)", border: "rgba(34,197,94,0.2)",
+  text: "#0f172a", muted: "#64748b", sidebar: "rgba(240,253,244,0.98)",
+};
+
+// ── PDF Export ────────────────────────────────────────────────────────────────
+function exportPDF(user, summary, transactions, filters) {
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+  doc.setFillColor(10,15,30);
+  doc.rect(0,0,pageW,40,"F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(22); doc.setTextColor(34,197,94);
+  doc.text("MindMoney",14,18);
+  doc.setFontSize(10); doc.setTextColor(148,163,184);
+  doc.text("Relatório Financeiro Comportamental",14,26);
+  doc.setFontSize(9); doc.setTextColor(100,116,139);
+  const now = new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"});
+  doc.text(`Gerado em ${now}`,14,34);
+  doc.text(`Usuário: ${user.name} (${user.email})`,pageW-14,34,{align:"right"});
+  if (filters.startDate||filters.endDate) doc.text(`Período: ${filters.startDate||"início"} até ${filters.endDate||"hoje"}`,pageW/2,34,{align:"center"});
+  let y=50;
+  const kpis=[
+    {label:"Saldo Total",value:summary.balance,color:summary.balance>=0?[34,197,94]:[248,113,113]},
+    {label:"Total Receitas",value:summary.totalIncome,color:[34,197,94]},
+    {label:"Total Gastos",value:summary.totalExpenses,color:[248,113,113]},
+  ];
+  const cardW=(pageW-28-8)/3;
+  kpis.forEach((kpi,i)=>{
+    const x=14+i*(cardW+4);
+    doc.setFillColor(15,23,42); doc.roundedRect(x,y,cardW,22,3,3,"F");
+    doc.setFontSize(8); doc.setTextColor(100,116,139); doc.text(kpi.label.toUpperCase(),x+4,y+8);
+    doc.setFont("helvetica","bold"); doc.setFontSize(12); doc.setTextColor(...kpi.color);
+    doc.text(fmt(kpi.value),x+4,y+17); doc.setFont("helvetica","normal");
+  });
+  y+=32;
+  if (summary.totalIncome>0) {
+    const rate=((summary.totalIncome-summary.totalExpenses)/summary.totalIncome*100).toFixed(1);
+    doc.setFillColor(15,23,42); doc.roundedRect(14,y,pageW-28,14,3,3,"F");
+    doc.setFontSize(9); doc.setTextColor(148,163,184); doc.text("Taxa de Poupança: ",18,y+9);
+    doc.setTextColor(34,197,94); doc.setFont("helvetica","bold"); doc.text(`${rate}%`,60,y+9);
+    doc.setFont("helvetica","normal"); doc.setTextColor(100,116,139);
+    const msg=parseFloat(rate)>=20?"✓ Excelente!":parseFloat(rate)>=10?"⚡ Pode melhorar.":"⚠ Abaixo do recomendado.";
+    doc.text(msg,80,y+9); y+=22;
+  }
+  if (summary.insight) {
+    doc.setFillColor(15,23,42); doc.roundedRect(14,y,pageW-28,18,3,3,"F");
+    doc.setFontSize(9); doc.setFont("helvetica","bold"); doc.setTextColor(56,189,248);
+    doc.text(summary.insight.title,18,y+7);
+    doc.setFont("helvetica","normal"); doc.setTextColor(148,163,184);
+    doc.text(doc.splitTextToSize(summary.insight.message,pageW-44)[0]||"",18,y+13); y+=26;
+  }
+  if (summary.categoryData?.length>0) {
+    doc.setFont("helvetica","bold"); doc.setFontSize(11); doc.setTextColor(255,255,255);
+    doc.text("Gastos por Categoria",14,y); y+=4;
+    autoTable(doc,{startY:y,head:[["Categoria","Valor","% do Total"]],
+      body:summary.categoryData.map(c=>[c.name,fmt(c.value),summary.totalExpenses>0?((c.value/summary.totalExpenses)*100).toFixed(1)+"%":"0%"]),
+      styles:{fontSize:9,cellPadding:4,fillColor:[15,23,42],textColor:[226,232,240]},
+      headStyles:{fillColor:[34,197,94],textColor:[10,15,30],fontStyle:"bold"},
+      alternateRowStyles:{fillColor:[20,30,50]},margin:{left:14,right:14}});
+    y=doc.lastAutoTable.finalY+12;
+  }
+  if (transactions?.length>0) {
+    if (y>220){doc.addPage();y=20;}
+    doc.setFont("helvetica","bold"); doc.setFontSize(11); doc.setTextColor(255,255,255);
+    doc.text("Extrato de Transações",14,y); y+=4;
+    autoTable(doc,{startY:y,head:[["Data","Descrição","Categoria","Tipo","Valor"]],
+      body:transactions.map(tx=>[new Date(tx.date+"T00:00:00").toLocaleDateString("pt-BR"),tx.description||tx.category,tx.category,tx.type==="income"?"Receita":"Gasto",(tx.type==="income"?"+":"-")+fmt(tx.amount)]),
+      styles:{fontSize:8,cellPadding:3,fillColor:[15,23,42],textColor:[226,232,240]},
+      headStyles:{fillColor:[30,41,59],textColor:[148,163,184],fontStyle:"bold"},
+      alternateRowStyles:{fillColor:[20,30,50]},
+      didParseCell:(data)=>{if(data.column.index===4&&data.section==="body"){const v=data.cell.raw||"";data.cell.styles.textColor=v.startsWith("+")?[34,197,94]:[248,113,113];}},
+      margin:{left:14,right:14}});
+  }
+  const pageCount=doc.internal.getNumberOfPages();
+  for(let i=1;i<=pageCount;i++){
+    doc.setPage(i); doc.setFontSize(7); doc.setTextColor(71,85,105);
+    doc.text("MindMoney — Relatório gerado automaticamente",14,doc.internal.pageSize.getHeight()-8);
+    doc.text(`Página ${i} de ${pageCount}`,pageW-14,doc.internal.pageSize.getHeight()-8,{align:"right"});
+  }
+  doc.save(`mindmoney-relatorio-${new Date().toISOString().split("T")[0]}.pdf`);
+}
+
+// ── Notification Toast ────────────────────────────────────────────────────────
+function NotificationToast({ notifications, onDismiss }) {
+  if (!notifications.length) return null;
+  return (
+    <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+      {notifications.map((n, i) => (
+        <div key={i} className="flex items-start gap-3 p-4 rounded-xl border shadow-lg animate-fade-up"
+          style={{background:n.type==="danger"?"rgba(248,113,113,0.15)":"rgba(251,191,36,0.15)", borderColor:n.type==="danger"?"rgba(248,113,113,0.4)":"rgba(251,191,36,0.4)", backdropFilter:"blur(12px)"}}>
+          <span className="text-lg">{n.type==="danger"?"🚨":"⚠️"}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-white" style={{fontFamily:"Syne"}}>{n.title}</p>
+            <p className="text-xs mt-0.5" style={{color:n.type==="danger"?"#fca5a5":"#fde68a"}}>{n.message}</p>
+          </div>
+          <button onClick={()=>onDismiss(i)} className="text-slate-400 hover:text-white text-xs ml-1">✕</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Custom Tooltip ────────────────────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload?.length) return (
     <div className="glass-card p-3 text-sm" style={{minWidth:140}}>
       <p className="text-slate-300 font-semibold mb-1">{label}</p>
-      {payload.map((p,i) => <p key={i} style={{color:p.color}}>{p.name}: {fmt(p.value)}</p>)}
+      {payload.map((p,i)=><p key={i} style={{color:p.color}}>{p.name}: {fmt(p.value)}</p>)}
     </div>
   );
   return null;
 };
 
-// ── Export PDF ────────────────────────────────────────────────────────────────
-function exportPDF(user, summary, transactions, filters) {
-  const doc = new jsPDF();
-  const pageW = doc.internal.pageSize.getWidth();
-
-  // Header background
-  doc.setFillColor(10, 15, 30);
-  doc.rect(0, 0, pageW, 40, "F");
-
-  // Logo text
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(22);
-  doc.setTextColor(34, 197, 94);
-  doc.text("MindMoney", 14, 18);
-  doc.setFontSize(10);
-  doc.setTextColor(148, 163, 184);
-  doc.text("Relatório Financeiro Comportamental", 14, 26);
-
-  // Date and user
-  doc.setFontSize(9);
-  doc.setTextColor(100, 116, 139);
-  const now = new Date().toLocaleDateString("pt-BR", { day:"2-digit", month:"long", year:"numeric" });
-  doc.text(`Gerado em ${now}`, 14, 34);
-  doc.text(`Usuário: ${user.name} (${user.email})`, pageW - 14, 34, { align: "right" });
-
-  if (filters.startDate || filters.endDate) {
-    const period = `Período: ${filters.startDate || "início"} até ${filters.endDate || "hoje"}`;
-    doc.text(period, pageW / 2, 34, { align: "center" });
-  }
-
-  let y = 50;
-
-  // KPI Cards
-  const kpis = [
-    { label: "Saldo Total", value: summary.balance, color: summary.balance >= 0 ? [34,197,94] : [248,113,113] },
-    { label: "Total Receitas", value: summary.totalIncome, color: [34,197,94] },
-    { label: "Total Gastos", value: summary.totalExpenses, color: [248,113,113] },
-  ];
-
-  const cardW = (pageW - 28 - 8) / 3;
-  kpis.forEach((kpi, i) => {
-    const x = 14 + i * (cardW + 4);
-    doc.setFillColor(15, 23, 42);
-    doc.roundedRect(x, y, cardW, 22, 3, 3, "F");
-    doc.setFontSize(8);
-    doc.setTextColor(100, 116, 139);
-    doc.text(kpi.label.toUpperCase(), x + 4, y + 8);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(...kpi.color);
-    const val = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(kpi.value);
-    doc.text(val, x + 4, y + 17);
-    doc.setFont("helvetica", "normal");
-  });
-
-  y += 32;
-
-  // Savings rate
-  if (summary.totalIncome > 0) {
-    const rate = ((summary.totalIncome - summary.totalExpenses) / summary.totalIncome * 100).toFixed(1);
-    doc.setFillColor(15, 23, 42);
-    doc.roundedRect(14, y, pageW - 28, 14, 3, 3, "F");
-    doc.setFontSize(9);
-    doc.setTextColor(148, 163, 184);
-    doc.text(`Taxa de Poupança: `, 18, y + 9);
-    doc.setTextColor(34, 197, 94);
-    doc.setFont("helvetica", "bold");
-    doc.text(`${rate}%`, 60, y + 9);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 116, 139);
-    const msg = parseFloat(rate) >= 20 ? "✓ Excelente! Acima da meta de 20%." : parseFloat(rate) >= 10 ? "⚡ Pode melhorar. Meta: 20%." : "⚠ Abaixo do recomendado (20%).";
-    doc.text(msg, 80, y + 9);
-    y += 22;
-  }
-
-  // IA Insight
-  if (summary.insight) {
-    doc.setFillColor(15, 23, 42);
-    doc.roundedRect(14, y, pageW - 28, 18, 3, 3, "F");
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(56, 189, 248);
-    doc.text(`${summary.insight.title}`, 18, y + 7);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(148, 163, 184);
-    const lines = doc.splitTextToSize(summary.insight.message, pageW - 44);
-    doc.text(lines[0] || "", 18, y + 13);
-    y += 26;
-  }
-
-  // Gastos por categoria
-  if (summary.categoryData?.length > 0) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(255, 255, 255);
-    doc.text("Gastos por Categoria", 14, y);
-    y += 4;
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Categoria", "Valor Gasto", "% do Total"]],
-      body: summary.categoryData.map(cat => [
-        cat.name,
-        new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cat.value),
-        summary.totalExpenses > 0 ? ((cat.value / summary.totalExpenses) * 100).toFixed(1) + "%" : "0%",
-      ]),
-      styles: { fontSize: 9, cellPadding: 4, fillColor: [15, 23, 42], textColor: [226, 232, 240] },
-      headStyles: { fillColor: [34, 197, 94], textColor: [10, 15, 30], fontStyle: "bold" },
-      alternateRowStyles: { fillColor: [20, 30, 50] },
-      margin: { left: 14, right: 14 },
-    });
-    y = doc.lastAutoTable.finalY + 12;
-  }
-
-  // Transações
-  if (transactions?.length > 0) {
-    if (y > 220) { doc.addPage(); y = 20; }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(255, 255, 255);
-    doc.text("Extrato de Transações", 14, y);
-    y += 4;
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Data", "Descrição", "Categoria", "Tipo", "Valor"]],
-      body: transactions.map(tx => [
-        new Date(tx.date + "T00:00:00").toLocaleDateString("pt-BR"),
-        tx.description || tx.category,
-        tx.category,
-        tx.type === "income" ? "Receita" : "Gasto",
-        (tx.type === "income" ? "+" : "-") + new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(tx.amount),
-      ]),
-      styles: { fontSize: 8, cellPadding: 3, fillColor: [15, 23, 42], textColor: [226, 232, 240] },
-      headStyles: { fillColor: [30, 41, 59], textColor: [148, 163, 184], fontStyle: "bold" },
-      alternateRowStyles: { fillColor: [20, 30, 50] },
-      columnStyles: {
-        4: { halign: "right" },
-      },
-      didParseCell: (data) => {
-        if (data.column.index === 4 && data.section === "body") {
-          const val = data.cell.raw || "";
-          data.cell.styles.textColor = val.startsWith("+") ? [34,197,94] : [248,113,113];
-        }
-      },
-      margin: { left: 14, right: 14 },
-    });
-  }
-
-  // Footer
-  const pageCount = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(7);
-    doc.setTextColor(71, 85, 105);
-    doc.text(`MindMoney — Relatório gerado automaticamente`, 14, doc.internal.pageSize.getHeight() - 8);
-    doc.text(`Página ${i} de ${pageCount}`, pageW - 14, doc.internal.pageSize.getHeight() - 8, { align: "right" });
-  }
-
-  const fileName = `mindmoney-relatorio-${new Date().toISOString().split("T")[0]}.pdf`;
-  doc.save(fileName);
-}
-
-
 // ── Auth Page ─────────────────────────────────────────────────────────────────
-function AuthPage({ onLogin }) {
+function AuthPage({ onLogin, theme }) {
   const [mode, setMode] = useState("login");
-  const [form, setForm] = useState({ email:"demo@mindmoney.com", password:"demo123", name:"" });
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
+  const [form, setForm] = useState({email:"demo@mindmoney.com",password:"demo123",name:""});
+  const [error, setError] = useState(""); const [loading, setLoading] = useState(false);
   const handleSubmit = async (e) => {
     e.preventDefault(); setError(""); setLoading(true);
     try {
-      const { data } = await api.post(mode==="login" ? "/api/auth/login" : "/api/auth/register", form);
-      localStorage.setItem("mm_token", data.token);
-      onLogin(data.user);
-    } catch (err) { setError(err.response?.data?.error || "Erro ao autenticar"); }
-    finally { setLoading(false); }
+      const {data} = await api.post(mode==="login"?"/api/auth/login":"/api/auth/register",form);
+      localStorage.setItem("mm_token",data.token); onLogin(data.user);
+    } catch(err){setError(err.response?.data?.error||"Erro ao autenticar");}
+    finally{setLoading(false);}
   };
-
+  const t = theme==="dark" ? DARK : LIGHT;
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative">
+    <div className="min-h-screen flex items-center justify-center p-4 relative" style={{background:t.bg}}>
       <div className="glow-bg"/><div className="glow-bg-2"/>
       <div className="w-full max-w-md relative z-10">
         <div className="text-center mb-8 animate-fade-up">
@@ -227,28 +166,28 @@ function AuthPage({ onLogin }) {
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center">
               <span className="text-white font-bold text-lg" style={{fontFamily:"Syne"}}>M</span>
             </div>
-            <span className="text-2xl font-bold text-white" style={{fontFamily:"Syne"}}>Mind<span className="text-green-400">Money</span></span>
+            <span className="text-2xl font-bold" style={{fontFamily:"Syne",color:t.text}}>Mind<span className="text-green-400">Money</span></span>
           </div>
-          <p className="text-slate-400 text-sm">Inteligência financeira comportamental</p>
+          <p className="text-sm" style={{color:t.muted}}>Inteligência financeira comportamental</p>
         </div>
-        <div className="glass-card p-8 animate-fade-up stagger-1">
-          <div className="flex gap-1 bg-slate-900/60 rounded-xl p-1 mb-7">
-            {["login","register"].map(m => (
-              <button key={m} onClick={() => {setMode(m);setError("");}}
+        <div className="glass-card p-8 animate-fade-up stagger-1" style={{background:t.card,borderColor:t.border}}>
+          <div className="flex gap-1 rounded-xl p-1 mb-7" style={{background:theme==="dark"?"rgba(15,23,42,0.6)":"rgba(0,0,0,0.05)"}}>
+            {["login","register"].map(m=>(
+              <button key={m} onClick={()=>{setMode(m);setError("");}}
                 className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all duration-200"
-                style={{fontFamily:"Syne", background:mode===m?"linear-gradient(135deg,#22c55e,#16a34a)":"transparent", color:mode===m?"white":"#64748b"}}>
+                style={{fontFamily:"Syne",background:mode===m?"linear-gradient(135deg,#22c55e,#16a34a)":"transparent",color:mode===m?"white":t.muted}}>
                 {m==="login"?"Entrar":"Cadastrar"}
               </button>
             ))}
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {mode==="register" && <div><label className="label">Nome</label><input className="input-field" placeholder="Seu nome" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></div>}
+            {mode==="register"&&<div><label className="label">Nome</label><input className="input-field" placeholder="Seu nome" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></div>}
             <div><label className="label">Email</label><input className="input-field" type="email" placeholder="seu@email.com" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} required/></div>
             <div><label className="label">Senha</label><input className="input-field" type="password" placeholder="••••••••" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} required/></div>
-            {error && <div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
+            {error&&<div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
             <button type="submit" className="btn-primary w-full py-3 text-base mt-2" disabled={loading}>{loading?"Aguarde...":mode==="login"?"Entrar":"Criar conta"}</button>
           </form>
-          {mode==="login" && <p className="text-center text-xs text-slate-500 mt-5">Demo: <span className="text-slate-400">demo@mindmoney.com / demo123</span></p>}
+          {mode==="login"&&<p className="text-center text-xs mt-5" style={{color:t.muted}}>Demo: <span style={{color:t.text}}>demo@mindmoney.com / demo123</span></p>}
         </div>
       </div>
     </div>
@@ -257,20 +196,17 @@ function AuthPage({ onLogin }) {
 
 // ── Add Transaction Modal ─────────────────────────────────────────────────────
 function AddTransactionModal({ onClose, onAdd }) {
-  const [form, setForm] = useState({ type:"expense", amount:"", category:"Alimentação", description:"", date:new Date().toISOString().split("T")[0] });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const categories = form.type==="expense" ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
-
+  const [form, setForm] = useState({type:"expense",amount:"",category:"Alimentação",description:"",date:new Date().toISOString().split("T")[0]});
+  const [loading, setLoading] = useState(false); const [error, setError] = useState("");
+  const categories = form.type==="expense"?EXPENSE_CATEGORIES:INCOME_CATEGORIES;
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.amount || parseFloat(form.amount)<=0) { setError("Informe um valor válido"); return; }
+    if (!form.amount||parseFloat(form.amount)<=0){setError("Informe um valor válido");return;}
     setLoading(true); setError("");
-    try { const {data} = await api.post("/api/transactions", form); onAdd(data); onClose(); }
-    catch (err) { setError(err.response?.data?.error || "Erro ao salvar"); }
-    finally { setLoading(false); }
+    try{const{data}=await api.post("/api/transactions",form);onAdd(data);onClose();}
+    catch(err){setError(err.response?.data?.error||"Erro ao salvar");}
+    finally{setLoading(false);}
   };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(5,8,16,0.85)",backdropFilter:"blur(8px)"}} onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="glass-card p-6 w-full max-w-md animate-fade-up">
@@ -279,10 +215,10 @@ function AddTransactionModal({ onClose, onAdd }) {
           <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors">✕</button>
         </div>
         <div className="flex gap-2 mb-5">
-          {["expense","income"].map(t => (
+          {["expense","income"].map(t=>(
             <button key={t} onClick={()=>setForm({...form,type:t,category:t==="expense"?"Alimentação":"Salário"})}
               className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all duration-200 border"
-              style={{fontFamily:"Syne", background:form.type===t?(t==="expense"?"rgba(248,113,113,0.15)":"rgba(74,222,128,0.15)"):"transparent", borderColor:form.type===t?(t==="expense"?"rgba(248,113,113,0.5)":"rgba(74,222,128,0.5)"):"rgba(148,163,184,0.15)", color:form.type===t?(t==="expense"?"#f87171":"#4ade80"):"#64748b"}}>
+              style={{fontFamily:"Syne",background:form.type===t?(t==="expense"?"rgba(248,113,113,0.15)":"rgba(74,222,128,0.15)"):"transparent",borderColor:form.type===t?(t==="expense"?"rgba(248,113,113,0.5)":"rgba(74,222,128,0.5)"):"rgba(148,163,184,0.15)",color:form.type===t?(t==="expense"?"#f87171":"#4ade80"):"#64748b"}}>
               {t==="expense"?"💸 Gasto":"💰 Receita"}
             </button>
           ))}
@@ -294,11 +230,11 @@ function AddTransactionModal({ onClose, onAdd }) {
           </div>
           <div><label className="label">Categoria</label>
             <select className="input-field" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>
-              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              {categories.map(c=><option key={c} value={c}>{c}</option>)}
             </select>
           </div>
           <div><label className="label">Descrição (opcional)</label><input className="input-field" placeholder="Ex: Supermercado Extra" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div>
-          {error && <div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
+          {error&&<div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
           <div className="flex gap-3 pt-1">
             <button type="button" className="btn-ghost flex-1" onClick={onClose}>Cancelar</button>
             <button type="submit" className="btn-primary flex-1" disabled={loading}>{loading?"Salvando...":"Adicionar"}</button>
@@ -309,58 +245,34 @@ function AddTransactionModal({ onClose, onAdd }) {
   );
 }
 
-// ── Period Filter Bar ─────────────────────────────────────────────────────────
+// ── Period Filter ─────────────────────────────────────────────────────────────
 function PeriodFilter({ filters, onChange }) {
-  const presets = [
-    { label: "Este mês", value: "thisMonth" },
-    { label: "Mês passado", value: "lastMonth" },
-    { label: "Últimos 3 meses", value: "last3" },
-    { label: "Este ano", value: "thisYear" },
-    { label: "Tudo", value: "all" },
-  ];
-
-  const applyPreset = (preset) => {
-    const now = new Date();
-    let startDate = "", endDate = "";
-    if (preset === "thisMonth") {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-      endDate = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().split("T")[0];
-    } else if (preset === "lastMonth") {
-      startDate = new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().split("T")[0];
-      endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split("T")[0];
-    } else if (preset === "last3") {
-      startDate = new Date(now.getFullYear(), now.getMonth()-2, 1).toISOString().split("T")[0];
-      endDate = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().split("T")[0];
-    } else if (preset === "thisYear") {
-      startDate = `${now.getFullYear()}-01-01`;
-      endDate = `${now.getFullYear()}-12-31`;
-    }
-    onChange({ startDate, endDate, preset });
+  const presets=[{label:"Este mês",value:"thisMonth"},{label:"Mês passado",value:"lastMonth"},{label:"3 meses",value:"last3"},{label:"Este ano",value:"thisYear"},{label:"Tudo",value:"all"}];
+  const applyPreset=(preset)=>{
+    const now=new Date(); let startDate="",endDate="";
+    if(preset==="thisMonth"){startDate=new Date(now.getFullYear(),now.getMonth(),1).toISOString().split("T")[0];endDate=new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().split("T")[0];}
+    else if(preset==="lastMonth"){startDate=new Date(now.getFullYear(),now.getMonth()-1,1).toISOString().split("T")[0];endDate=new Date(now.getFullYear(),now.getMonth(),0).toISOString().split("T")[0];}
+    else if(preset==="last3"){startDate=new Date(now.getFullYear(),now.getMonth()-2,1).toISOString().split("T")[0];endDate=new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().split("T")[0];}
+    else if(preset==="thisYear"){startDate=`${now.getFullYear()}-01-01`;endDate=`${now.getFullYear()}-12-31`;}
+    onChange({startDate,endDate,preset});
   };
-
   return (
     <div className="glass-card p-4 mb-5">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Período:</span>
         <div className="flex flex-wrap gap-2">
-          {presets.map(p => (
-            <button key={p.value} onClick={() => applyPreset(p.value)}
+          {presets.map(p=>(
+            <button key={p.value} onClick={()=>applyPreset(p.value)}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200"
-              style={{
-                background: filters.preset===p.value ? "linear-gradient(135deg,#22c55e,#16a34a)" : "rgba(255,255,255,0.05)",
-                color: filters.preset===p.value ? "white" : "#64748b",
-                fontFamily: "Syne",
-              }}>
+              style={{fontFamily:"Syne",background:filters.preset===p.value?"linear-gradient(135deg,#22c55e,#16a34a)":"rgba(255,255,255,0.05)",color:filters.preset===p.value?"white":"#64748b"}}>
               {p.label}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-2 ml-auto">
-          <input type="date" className="input-field text-xs py-1.5" style={{width:130}} value={filters.startDate}
-            onChange={e => onChange({...filters, startDate:e.target.value, preset:"custom"})}/>
+          <input type="date" className="input-field text-xs py-1.5" style={{width:130}} value={filters.startDate} onChange={e=>onChange({...filters,startDate:e.target.value,preset:"custom"})}/>
           <span className="text-slate-500 text-xs">até</span>
-          <input type="date" className="input-field text-xs py-1.5" style={{width:130}} value={filters.endDate}
-            onChange={e => onChange({...filters, endDate:e.target.value, preset:"custom"})}/>
+          <input type="date" className="input-field text-xs py-1.5" style={{width:130}} value={filters.endDate} onChange={e=>onChange({...filters,endDate:e.target.value,preset:"custom"})}/>
         </div>
       </div>
     </div>
@@ -370,20 +282,120 @@ function PeriodFilter({ filters, onChange }) {
 // ── Insight Card ──────────────────────────────────────────────────────────────
 function InsightCard({ insight }) {
   if (!insight) return null;
-  const styles = {
-    positive: { border:"rgba(74,222,128,0.3)",  bg:"rgba(74,222,128,0.07)",  dot:"#4ade80" },
-    warning:  { border:"rgba(251,191,36,0.3)",  bg:"rgba(251,191,36,0.07)",  dot:"#fbbf24" },
-    danger:   { border:"rgba(248,113,113,0.3)", bg:"rgba(248,113,113,0.07)", dot:"#f87171" },
-    info:     { border:"rgba(56,189,248,0.3)",  bg:"rgba(56,189,248,0.07)",  dot:"#38bdf8" },
-  };
-  const s = styles[insight.type] || styles.info;
+  const styles={positive:{border:"rgba(74,222,128,0.3)",bg:"rgba(74,222,128,0.07)",dot:"#4ade80"},warning:{border:"rgba(251,191,36,0.3)",bg:"rgba(251,191,36,0.07)",dot:"#fbbf24"},danger:{border:"rgba(248,113,113,0.3)",bg:"rgba(248,113,113,0.07)",dot:"#f87171"},info:{border:"rgba(56,189,248,0.3)",bg:"rgba(56,189,248,0.07)",dot:"#38bdf8"}};
+  const s=styles[insight.type]||styles.info;
   return (
-    <div className="rounded-2xl p-5 border" style={{background:s.bg, borderColor:s.border}}>
+    <div className="rounded-2xl p-5 border" style={{background:s.bg,borderColor:s.border}}>
       <div className="flex items-start gap-3">
-        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1" style={{background:s.dot, boxShadow:`0 0 8px ${s.dot}`}}/>
-        <div>
-          <p className="font-bold text-white mb-1" style={{fontFamily:"Syne"}}>{insight.title}</p>
-          <p className="text-sm text-slate-300 leading-relaxed">{insight.message}</p>
+        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1" style={{background:s.dot,boxShadow:`0 0 8px ${s.dot}`}}/>
+        <div><p className="font-bold text-white mb-1" style={{fontFamily:"Syne"}}>{insight.title}</p><p className="text-sm text-slate-300 leading-relaxed">{insight.message}</p></div>
+      </div>
+    </div>
+  );
+}
+
+// ── Profile Tab ───────────────────────────────────────────────────────────────
+function ProfileTab({ user, onUpdate, onLogout, theme, onThemeToggle }) {
+  const [nameForm, setNameForm] = useState({ name: user.name });
+  const [passForm, setPassForm] = useState({ currentPassword:"", newPassword:"", confirm:"" });
+  const [nameMsg, setNameMsg] = useState("");
+  const [passMsg, setPassMsg] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleNameSave = async (e) => {
+    e.preventDefault(); setLoading(true); setNameMsg("");
+    try {
+      const { data } = await api.patch("/api/profile", { name: nameForm.name });
+      localStorage.setItem("mm_token", data.token);
+      onUpdate(data.user);
+      setNameMsg("✅ Nome atualizado!");
+    } catch(err) { setNameMsg("❌ " + (err.response?.data?.error||"Erro")); }
+    finally { setLoading(false); }
+  };
+
+  const handlePassSave = async (e) => {
+    e.preventDefault();
+    if (passForm.newPassword !== passForm.confirm) { setPassMsg("❌ As senhas não coincidem"); return; }
+    if (passForm.newPassword.length < 4) { setPassMsg("❌ Senha muito curta (mín. 4 caracteres)"); return; }
+    setLoading(true); setPassMsg("");
+    try {
+      await api.patch("/api/profile", { currentPassword: passForm.currentPassword, newPassword: passForm.newPassword });
+      setPassMsg("✅ Senha alterada com sucesso!");
+      setPassForm({ currentPassword:"", newPassword:"", confirm:"" });
+    } catch(err) { setPassMsg("❌ " + (err.response?.data?.error||"Erro")); }
+    finally { setLoading(false); }
+  };
+
+  const initials = user.name.split(" ").map(n=>n[0]).join("").toUpperCase().slice(0,2);
+
+  return (
+    <div className="pb-20 md:pb-0 max-w-lg">
+      <div className="mb-6 animate-fade-up">
+        <h1 className="text-2xl font-bold text-white">Meu Perfil</h1>
+        <p className="text-slate-400 text-sm mt-0.5">Gerencie suas informações pessoais</p>
+      </div>
+
+      {/* Avatar */}
+      <div className="glass-card p-6 mb-4 animate-fade-up stagger-1">
+        <div className="flex items-center gap-4">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center flex-shrink-0">
+            <span className="text-white text-2xl font-bold" style={{fontFamily:"Syne"}}>{initials}</span>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-white" style={{fontFamily:"Syne"}}>{user.name}</p>
+            <p className="text-slate-400 text-sm">{user.email}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Theme Toggle */}
+      <div className="glass-card p-5 mb-4 animate-fade-up stagger-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-white" style={{fontFamily:"Syne"}}>Aparência</p>
+            <p className="text-xs text-slate-400 mt-0.5">Alternar entre modo escuro e claro</p>
+          </div>
+          <button onClick={onThemeToggle}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border transition-all duration-200"
+            style={{background:theme==="dark"?"rgba(251,191,36,0.1)":"rgba(99,102,241,0.1)", borderColor:theme==="dark"?"rgba(251,191,36,0.3)":"rgba(99,102,241,0.3)", color:theme==="dark"?"#fbbf24":"#818cf8"}}>
+            <span>{theme==="dark"?"☀️":"🌙"}</span>
+            <span className="text-sm font-semibold" style={{fontFamily:"Syne"}}>{theme==="dark"?"Modo Claro":"Modo Escuro"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Edit Name */}
+      <div className="glass-card p-5 mb-4 animate-fade-up stagger-2">
+        <h3 className="font-bold text-white mb-4" style={{fontFamily:"Syne"}}>✏️ Editar Nome</h3>
+        <form onSubmit={handleNameSave} className="space-y-3">
+          <div><label className="label">Nome completo</label><input className="input-field" value={nameForm.name} onChange={e=>setNameForm({name:e.target.value})} required/></div>
+          {nameMsg && <p className="text-sm">{nameMsg}</p>}
+          <button type="submit" className="btn-primary w-full" disabled={loading}>Salvar Nome</button>
+        </form>
+      </div>
+
+      {/* Change Password */}
+      <div className="glass-card p-5 mb-4 animate-fade-up stagger-3">
+        <h3 className="font-bold text-white mb-4" style={{fontFamily:"Syne"}}>🔒 Alterar Senha</h3>
+        <form onSubmit={handlePassSave} className="space-y-3">
+          <div><label className="label">Senha atual</label><input className="input-field" type="password" placeholder="••••••••" value={passForm.currentPassword} onChange={e=>setPassForm({...passForm,currentPassword:e.target.value})} required/></div>
+          <div><label className="label">Nova senha</label><input className="input-field" type="password" placeholder="••••••••" value={passForm.newPassword} onChange={e=>setPassForm({...passForm,newPassword:e.target.value})} required/></div>
+          <div><label className="label">Confirmar nova senha</label><input className="input-field" type="password" placeholder="••••••••" value={passForm.confirm} onChange={e=>setPassForm({...passForm,confirm:e.target.value})} required/></div>
+          {passMsg && <p className="text-sm">{passMsg}</p>}
+          <button type="submit" className="btn-primary w-full" disabled={loading}>Alterar Senha</button>
+        </form>
+      </div>
+
+      {/* Logout */}
+      <div className="glass-card p-5 animate-fade-up stagger-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-white" style={{fontFamily:"Syne"}}>Sair da conta</p>
+            <p className="text-xs text-slate-400 mt-0.5">Encerrar sessão atual</p>
+          </div>
+          <button onClick={onLogout} className="px-4 py-2 rounded-xl border border-red-400/30 bg-red-400/10 text-red-400 text-sm font-semibold hover:bg-red-400/20 transition-all" style={{fontFamily:"Syne"}}>
+            Sair →
+          </button>
         </div>
       </div>
     </div>
@@ -392,49 +404,20 @@ function InsightCard({ insight }) {
 
 // ── Goals Tab ─────────────────────────────────────────────────────────────────
 function GoalsTab() {
-  const [goals, setGoals] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title:"", target_amount:"", category:"", deadline:"" });
-  const [depositId, setDepositId] = useState(null);
-  const [depositVal, setDepositVal] = useState("");
-
-  useEffect(() => { api.get("/api/goals").then(r => setGoals(r.data)).catch(()=>{}); }, []);
-
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    const { data } = await api.post("/api/goals", form);
-    setGoals(prev => [data, ...prev]);
-    setShowForm(false);
-    setForm({ title:"", target_amount:"", category:"", deadline:"" });
-  };
-
-  const handleDeposit = async (goal) => {
-    const val = parseFloat(depositVal);
-    if (!val || val <= 0) return;
-    const newVal = Math.min(goal.current_amount + val, goal.target_amount);
-    const { data } = await api.patch(`/api/goals/${goal.id}`, { current_amount: newVal });
-    setGoals(prev => prev.map(g => g.id===goal.id ? data : g));
-    setDepositId(null); setDepositVal("");
-  };
-
-  const handleDelete = async (id) => {
-    await api.delete(`/api/goals/${id}`);
-    setGoals(prev => prev.filter(g => g.id !== id));
-  };
-
+  const [goals,setGoals]=useState([]); const [showForm,setShowForm]=useState(false);
+  const [form,setForm]=useState({title:"",target_amount:"",category:"",deadline:""});
+  const [depositId,setDepositId]=useState(null); const [depositVal,setDepositVal]=useState("");
+  useEffect(()=>{api.get("/api/goals").then(r=>setGoals(r.data)).catch(()=>{});}, []);
+  const handleAdd=async(e)=>{e.preventDefault();const{data}=await api.post("/api/goals",form);setGoals(p=>[data,...p]);setShowForm(false);setForm({title:"",target_amount:"",category:"",deadline:""}); };
+  const handleDeposit=async(goal)=>{const val=parseFloat(depositVal);if(!val||val<=0)return;const newVal=Math.min(goal.current_amount+val,goal.target_amount);const{data}=await api.patch(`/api/goals/${goal.id}`,{current_amount:newVal});setGoals(p=>p.map(g=>g.id===goal.id?data:g));setDepositId(null);setDepositVal("");};
+  const handleDelete=async(id)=>{await api.delete(`/api/goals/${id}`);setGoals(p=>p.filter(g=>g.id!==id));};
   return (
     <div className="pb-20 md:pb-0">
       <div className="flex items-center justify-between mb-6 animate-fade-up">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Metas Financeiras</h1>
-          <p className="text-slate-400 text-sm mt-0.5">{goals.length} metas cadastradas</p>
-        </div>
-        <button className="btn-primary flex items-center gap-2" onClick={() => setShowForm(!showForm)}>
-          <span className="text-lg leading-none">+</span> Nova Meta
-        </button>
+        <div><h1 className="text-2xl font-bold text-white">Metas Financeiras</h1><p className="text-slate-400 text-sm mt-0.5">{goals.length} metas cadastradas</p></div>
+        <button className="btn-primary flex items-center gap-2" onClick={()=>setShowForm(!showForm)}><span className="text-lg leading-none">+</span> Nova Meta</button>
       </div>
-
-      {showForm && (
+      {showForm&&(
         <div className="glass-card p-5 mb-5 animate-fade-up">
           <h3 className="font-bold text-white mb-4">Nova Meta</h3>
           <form onSubmit={handleAdd} className="space-y-3">
@@ -443,66 +426,41 @@ function GoalsTab() {
               <div><label className="label">Valor Alvo (R$)</label><input className="input-field" type="number" min="1" step="0.01" placeholder="5000" value={form.target_amount} onChange={e=>setForm({...form,target_amount:e.target.value})} required/></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="label">Categoria</label>
-                <select className="input-field" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>
-                  <option value="">Geral</option>
-                  {[...EXPENSE_CATEGORIES,...INCOME_CATEGORIES].map(c=><option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+              <div><label className="label">Categoria</label><select className="input-field" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}><option value="">Geral</option>{[...EXPENSE_CATEGORIES,...INCOME_CATEGORIES].map(c=><option key={c} value={c}>{c}</option>)}</select></div>
               <div><label className="label">Prazo</label><input className="input-field" type="date" value={form.deadline} onChange={e=>setForm({...form,deadline:e.target.value})}/></div>
             </div>
-            <div className="flex gap-3">
-              <button type="button" className="btn-ghost flex-1" onClick={()=>setShowForm(false)}>Cancelar</button>
-              <button type="submit" className="btn-primary flex-1">Criar Meta</button>
-            </div>
+            <div className="flex gap-3"><button type="button" className="btn-ghost flex-1" onClick={()=>setShowForm(false)}>Cancelar</button><button type="submit" className="btn-primary flex-1">Criar Meta</button></div>
           </form>
         </div>
       )}
-
-      {goals.length === 0 ? (
-        <div className="glass-card p-10 text-center animate-fade-up">
-          <p className="text-4xl mb-3">🎯</p>
-          <p className="text-white font-semibold">Nenhuma meta ainda</p>
-          <p className="text-slate-400 text-sm mt-1">Crie sua primeira meta financeira!</p>
-        </div>
-      ) : (
+      {goals.length===0?(
+        <div className="glass-card p-10 text-center animate-fade-up"><p className="text-4xl mb-3">🎯</p><p className="text-white font-semibold">Nenhuma meta ainda</p><p className="text-slate-400 text-sm mt-1">Crie sua primeira meta financeira!</p></div>
+      ):(
         <div className="space-y-4 animate-fade-up">
-          {goals.map(goal => {
-            const pct = Math.min((goal.current_amount / goal.target_amount) * 100, 100);
-            const done = pct >= 100;
+          {goals.map(goal=>{
+            const pct=Math.min((goal.current_amount/goal.target_amount)*100,100); const done=pct>=100;
             return (
               <div key={goal.id} className="glass-card glass-card-hover p-5">
                 <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <p className="font-bold text-white" style={{fontFamily:"Syne"}}>{done ? "✅ " : "🎯 "}{goal.title}</p>
+                  <div><p className="font-bold text-white" style={{fontFamily:"Syne"}}>{done?"✅ ":"🎯 "}{goal.title}</p>
                     <div className="flex items-center gap-2 mt-0.5">
-                      {goal.category && <span className="tag" style={{background:"rgba(74,222,128,0.1)",color:"#4ade80"}}>{goal.category}</span>}
-                      {goal.deadline && <span className="text-xs text-slate-500">Prazo: {new Date(goal.deadline+"T00:00:00").toLocaleDateString("pt-BR")}</span>}
+                      {goal.category&&<span className="tag" style={{background:"rgba(74,222,128,0.1)",color:"#4ade80"}}>{goal.category}</span>}
+                      {goal.deadline&&<span className="text-xs text-slate-500">Prazo: {new Date(goal.deadline+"T00:00:00").toLocaleDateString("pt-BR")}</span>}
                     </div>
                   </div>
                   <button onClick={()=>handleDelete(goal.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-600 hover:text-red-400 hover:bg-red-400/10 transition-colors text-sm">✕</button>
                 </div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-slate-400">{fmt(goal.current_amount)} guardados</span>
-                  <span className="text-white font-semibold">{fmt(goal.target_amount)}</span>
-                </div>
-                <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-3">
-                  <div className="h-full rounded-full transition-all duration-700"
-                    style={{width:`${pct}%`, background:done?"linear-gradient(90deg,#4ade80,#22c55e)":"linear-gradient(90deg,#38bdf8,#818cf8)"}}/>
-                </div>
+                <div className="flex justify-between text-sm mb-2"><span className="text-slate-400">{fmt(goal.current_amount)} guardados</span><span className="text-white font-semibold">{fmt(goal.target_amount)}</span></div>
+                <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-3"><div className="h-full rounded-full transition-all duration-700" style={{width:`${pct}%`,background:done?"linear-gradient(90deg,#4ade80,#22c55e)":"linear-gradient(90deg,#38bdf8,#818cf8)"}}/></div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold" style={{color:done?"#4ade80":"#38bdf8"}}>{pct.toFixed(1)}% concluído</span>
-                  {!done && (
-                    depositId === goal.id ? (
-                      <div className="flex items-center gap-2">
-                        <input className="input-field text-xs py-1" style={{width:100}} type="number" min="1" step="0.01" placeholder="R$ valor" value={depositVal} onChange={e=>setDepositVal(e.target.value)}/>
-                        <button className="btn-primary py-1 px-3 text-xs" onClick={()=>handleDeposit(goal)}>+</button>
-                        <button className="btn-ghost py-1 px-3 text-xs" onClick={()=>{setDepositId(null);setDepositVal("");}}>✕</button>
-                      </div>
-                    ) : (
-                      <button className="btn-ghost py-1 px-3 text-xs" onClick={()=>setDepositId(goal.id)}>+ Adicionar valor</button>
-                    )
-                  )}
+                  {!done&&(depositId===goal.id?(
+                    <div className="flex items-center gap-2">
+                      <input className="input-field text-xs py-1" style={{width:100}} type="number" min="1" step="0.01" placeholder="R$ valor" value={depositVal} onChange={e=>setDepositVal(e.target.value)}/>
+                      <button className="btn-primary py-1 px-3 text-xs" onClick={()=>handleDeposit(goal)}>+</button>
+                      <button className="btn-ghost py-1 px-3 text-xs" onClick={()=>{setDepositId(null);setDepositVal("");}}>✕</button>
+                    </div>
+                  ):(<button className="btn-ghost py-1 px-3 text-xs" onClick={()=>setDepositId(goal.id)}>+ Adicionar valor</button>))}
                 </div>
               </div>
             );
@@ -515,101 +473,53 @@ function GoalsTab() {
 
 // ── Alerts Tab ────────────────────────────────────────────────────────────────
 function AlertsTab({ summary }) {
-  const [alerts, setAlerts] = useState([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ category:"Alimentação", limit_amount:"" });
-
-  useEffect(() => { api.get("/api/alerts").then(r => setAlerts(r.data)).catch(()=>{}); }, []);
-
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    const { data } = await api.post("/api/alerts", form);
-    setAlerts(prev => [data, ...prev]);
-    setShowForm(false);
-    setForm({ category:"Alimentação", limit_amount:"" });
-  };
-
-  const handleDelete = async (id) => {
-    await api.delete(`/api/alerts/${id}`);
-    setAlerts(prev => prev.filter(a => a.id !== id));
-  };
-
-  const getCategorySpend = (category) => {
-    if (!summary?.categoryData) return 0;
-    return summary.categoryData.find(c => c.name === category)?.value || 0;
-  };
-
+  const [alerts,setAlerts]=useState([]); const [showForm,setShowForm]=useState(false);
+  const [form,setForm]=useState({category:"Alimentação",limit_amount:""});
+  useEffect(()=>{api.get("/api/alerts").then(r=>setAlerts(r.data)).catch(()=>{});}, []);
+  const handleAdd=async(e)=>{e.preventDefault();const{data}=await api.post("/api/alerts",form);setAlerts(p=>[data,...p]);setShowForm(false);setForm({category:"Alimentação",limit_amount:""});};
+  const handleDelete=async(id)=>{await api.delete(`/api/alerts/${id}`);setAlerts(p=>p.filter(a=>a.id!==id));};
+  const getCategorySpend=(cat)=>summary?.categoryData?.find(c=>c.name===cat)?.value||0;
   return (
     <div className="pb-20 md:pb-0">
       <div className="flex items-center justify-between mb-6 animate-fade-up">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Alertas de Limite</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Seja avisado quando ultrapassar seu limite</p>
-        </div>
-        <button className="btn-primary flex items-center gap-2" onClick={() => setShowForm(!showForm)}>
-          <span className="text-lg leading-none">+</span> Novo Alerta
-        </button>
+        <div><h1 className="text-2xl font-bold text-white">Alertas de Limite</h1><p className="text-slate-400 text-sm mt-0.5">Seja avisado quando ultrapassar seu limite</p></div>
+        <button className="btn-primary flex items-center gap-2" onClick={()=>setShowForm(!showForm)}><span className="text-lg leading-none">+</span> Novo Alerta</button>
       </div>
-
-      {showForm && (
+      {showForm&&(
         <div className="glass-card p-5 mb-5 animate-fade-up">
-          <h3 className="font-bold text-white mb-4">Novo Alerta</h3>
           <form onSubmit={handleAdd} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="label">Categoria</label>
-                <select className="input-field" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>
-                  {EXPENSE_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+              <div><label className="label">Categoria</label><select className="input-field" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>{EXPENSE_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}</select></div>
               <div><label className="label">Limite (R$)</label><input className="input-field" type="number" min="1" step="0.01" placeholder="500" value={form.limit_amount} onChange={e=>setForm({...form,limit_amount:e.target.value})} required/></div>
             </div>
-            <div className="flex gap-3">
-              <button type="button" className="btn-ghost flex-1" onClick={()=>setShowForm(false)}>Cancelar</button>
-              <button type="submit" className="btn-primary flex-1">Criar Alerta</button>
-            </div>
+            <div className="flex gap-3"><button type="button" className="btn-ghost flex-1" onClick={()=>setShowForm(false)}>Cancelar</button><button type="submit" className="btn-primary flex-1">Criar Alerta</button></div>
           </form>
         </div>
       )}
-
-      {alerts.length === 0 ? (
-        <div className="glass-card p-10 text-center animate-fade-up">
-          <p className="text-4xl mb-3">🔔</p>
-          <p className="text-white font-semibold">Nenhum alerta configurado</p>
-          <p className="text-slate-400 text-sm mt-1">Crie alertas para controlar seus gastos por categoria!</p>
-        </div>
-      ) : (
+      {alerts.length===0?(
+        <div className="glass-card p-10 text-center animate-fade-up"><p className="text-4xl mb-3">🔔</p><p className="text-white font-semibold">Nenhum alerta configurado</p><p className="text-slate-400 text-sm mt-1">Crie alertas para controlar seus gastos por categoria!</p></div>
+      ):(
         <div className="space-y-3 animate-fade-up">
-          {alerts.map(alert => {
-            const spent = getCategorySpend(alert.category);
-            const pct = Math.min((spent / alert.limit_amount) * 100, 100);
-            const exceeded = spent > alert.limit_amount;
-            const warning = pct >= 80 && !exceeded;
+          {alerts.map(alert=>{
+            const spent=getCategorySpend(alert.category); const pct=Math.min((spent/alert.limit_amount)*100,100);
+            const exceeded=spent>alert.limit_amount; const warning=pct>=80&&!exceeded;
             return (
-              <div key={alert.id} className="glass-card glass-card-hover p-5"
-                style={{borderColor:exceeded?"rgba(248,113,113,0.3)":warning?"rgba(251,191,36,0.3)":"rgba(74,222,128,0.1)"}}>
+              <div key={alert.id} className="glass-card glass-card-hover p-5" style={{borderColor:exceeded?"rgba(248,113,113,0.3)":warning?"rgba(251,191,36,0.3)":"rgba(74,222,128,0.1)"}}>
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:`${CATEGORY_COLORS[alert.category]||"#94a3b8"}20`}}>
-                      <span>{exceeded?"🚨":warning?"⚠️":"✅"}</span>
-                    </div>
-                    <div>
-                      <p className="font-bold text-white" style={{fontFamily:"Syne"}}>{alert.category}</p>
-                      <p className="text-xs text-slate-500">Limite: {fmt(alert.limit_amount)}</p>
-                    </div>
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:`${CATEGORY_COLORS[alert.category]||"#94a3b8"}20`}}><span>{exceeded?"🚨":warning?"⚠️":"✅"}</span></div>
+                    <div><p className="font-bold text-white" style={{fontFamily:"Syne"}}>{alert.category}</p><p className="text-xs text-slate-500">Limite: {fmt(alert.limit_amount)}</p></div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <p className="font-bold text-sm" style={{fontFamily:"Syne", color:exceeded?"#f87171":warning?"#fbbf24":"#4ade80"}}>{fmt(spent)}</p>
+                    <p className="font-bold text-sm" style={{fontFamily:"Syne",color:exceeded?"#f87171":warning?"#fbbf24":"#4ade80"}}>{fmt(spent)}</p>
                     <button onClick={()=>handleDelete(alert.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-600 hover:text-red-400 hover:bg-red-400/10 transition-colors text-sm">✕</button>
                   </div>
                 </div>
-                <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-1">
-                  <div className="h-full rounded-full transition-all duration-700"
-                    style={{width:`${pct}%`, background:exceeded?"#f87171":warning?"#fbbf24":"#4ade80"}}/>
-                </div>
+                <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-1"><div className="h-full rounded-full transition-all duration-700" style={{width:`${pct}%`,background:exceeded?"#f87171":warning?"#fbbf24":"#4ade80"}}/></div>
                 <div className="flex justify-between text-xs text-slate-500">
                   <span>{pct.toFixed(1)}% do limite usado</span>
-                  {exceeded && <span className="text-red-400 font-semibold">Limite ultrapassado em {fmt(spent-alert.limit_amount)}!</span>}
-                  {warning && <span className="text-yellow-400 font-semibold">Atenção! Quase no limite.</span>}
+                  {exceeded&&<span className="text-red-400 font-semibold">Ultrapassado em {fmt(spent-alert.limit_amount)}!</span>}
+                  {warning&&<span className="text-yellow-400 font-semibold">Atenção! Quase no limite.</span>}
                 </div>
               </div>
             );
@@ -622,84 +532,95 @@ function AlertsTab({ summary }) {
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [initialized, setInitialized] = useState(false);
-  const [transactions, setTransactions] = useState([]);
-  const [summary, setSummary] = useState(null);
-  const [activeTab, setActiveTab] = useState("dashboard");
-  const [showModal, setShowModal] = useState(false);
-  const [loadingData, setLoadingData] = useState(false);
-  const [filters, setFilters] = useState({ startDate:"", endDate:"", preset:"all" });
+  const [user,setUser]=useState(null); const [initialized,setInitialized]=useState(false);
+  const [transactions,setTransactions]=useState([]); const [summary,setSummary]=useState(null);
+  const [activeTab,setActiveTab]=useState("dashboard"); const [showModal,setShowModal]=useState(false);
+  const [loadingData,setLoadingData]=useState(false);
+  const [filters,setFilters]=useState({startDate:"",endDate:"",preset:"all"});
+  const [theme,setTheme]=useState(()=>localStorage.getItem("mm_theme")||"dark");
+  const [notifications,setNotifications]=useState([]);
 
-  useEffect(() => {
-    const token = localStorage.getItem("mm_token");
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        if (payload.exp * 1000 > Date.now()) setUser({ id:payload.id, email:payload.email, name:payload.name });
-        else localStorage.removeItem("mm_token");
-      } catch { localStorage.removeItem("mm_token"); }
-    }
+  useEffect(()=>{
+    const token=localStorage.getItem("mm_token");
+    if(token){try{const p=JSON.parse(atob(token.split(".")[1]));if(p.exp*1000>Date.now())setUser({id:p.id,email:p.email,name:p.name});else localStorage.removeItem("mm_token");}catch{localStorage.removeItem("mm_token");}}
     setInitialized(true);
+  },[]);
+
+  useEffect(()=>{
+    localStorage.setItem("mm_theme",theme);
+    document.body.style.backgroundColor = theme==="dark"?"#050810":"#f0fdf4";
+    document.body.style.color = theme==="dark"?"#e2e8f0":"#0f172a";
+  },[theme]);
+
+  const checkAlerts = useCallback(async (summaryData) => {
+    if (!summaryData?.categoryData) return;
+    try {
+      const {data: alerts} = await api.get("/api/alerts");
+      const triggered = [];
+      alerts.forEach(alert => {
+        const spent = summaryData.categoryData.find(c=>c.name===alert.category)?.value||0;
+        if (spent > alert.limit_amount) {
+          triggered.push({type:"danger",title:`🚨 Limite ultrapassado: ${alert.category}`,message:`Você gastou ${fmt(spent)} de ${fmt(alert.limit_amount)} nesta categoria.`});
+        } else if ((spent/alert.limit_amount)*100 >= 80) {
+          triggered.push({type:"warning",title:`⚠️ Quase no limite: ${alert.category}`,message:`${((spent/alert.limit_amount)*100).toFixed(0)}% do limite de ${fmt(alert.limit_amount)} utilizado.`});
+        }
+      });
+      if (triggered.length) setNotifications(triggered);
+    } catch {}
   }, []);
 
   const fetchData = useCallback(async () => {
-    if (!user) return;
-    setLoadingData(true);
+    if (!user) return; setLoadingData(true);
     try {
-      const params = {};
-      if (filters.startDate) params.startDate = filters.startDate;
-      if (filters.endDate) params.endDate = filters.endDate;
-      const [txRes, sumRes] = await Promise.all([
-        api.get("/api/transactions", { params }),
-        api.get("/api/summary", { params }),
-      ]);
-      setTransactions(txRes.data);
-      setSummary(sumRes.data);
-    } catch(err) { console.error(err); }
-    finally { setLoadingData(false); }
-  }, [user, filters]);
+      const params={};
+      if(filters.startDate) params.startDate=filters.startDate;
+      if(filters.endDate) params.endDate=filters.endDate;
+      const [txRes,sumRes]=await Promise.all([api.get("/api/transactions",{params}),api.get("/api/summary",{params})]);
+      setTransactions(txRes.data); setSummary(sumRes.data);
+      checkAlerts(sumRes.data);
+    } catch(err){console.error(err);}
+    finally{setLoadingData(false);}
+  },[user,filters,checkAlerts]);
 
-  useEffect(() => { if (user) fetchData(); }, [user, fetchData]);
+  useEffect(()=>{if(user)fetchData();},[user,fetchData]);
 
-  const handleLogout = () => { localStorage.removeItem("mm_token"); setUser(null); setTransactions([]); setSummary(null); };
-  const handleAddTransaction = () => fetchData();
-  const handleDelete = async (id) => {
-    if (!confirm("Remover esta transação?")) return;
-    try { await api.delete(`/api/transactions/${id}`); fetchData(); }
-    catch { alert("Erro ao remover"); }
-  };
+  const handleLogout=()=>{localStorage.removeItem("mm_token");setUser(null);setTransactions([]);setSummary(null);};
+  const handleDelete=async(id)=>{if(!confirm("Remover esta transação?"))return;try{await api.delete(`/api/transactions/${id}`);fetchData();}catch{alert("Erro ao remover");}};
 
-  if (!initialized) return null;
-  if (!user) return <AuthPage onLogin={setUser}/>;
+  if(!initialized) return null;
+  if(!user) return <AuthPage onLogin={setUser} theme={theme}/>;
 
-  const pieColors = Object.values(CATEGORY_COLORS);
-  const navItems = [
-    { id:"dashboard", icon:"◈", label:"Dashboard" },
-    { id:"transactions", icon:"⟳", label:"Transações" },
-    { id:"goals", icon:"🎯", label:"Metas" },
-    { id:"alerts", icon:"🔔", label:"Alertas" },
-    { id:"insights", icon:"◎", label:"Insights" },
+  const pieColors=Object.values(CATEGORY_COLORS);
+  const navItems=[
+    {id:"dashboard",icon:"◈",label:"Dashboard"},
+    {id:"transactions",icon:"⟳",label:"Transações"},
+    {id:"goals",icon:"🎯",label:"Metas"},
+    {id:"alerts",icon:"🔔",label:"Alertas"},
+    {id:"insights",icon:"◎",label:"Insights"},
+    {id:"profile",icon:"👤",label:"Perfil"},
   ];
 
+  const isDark = theme==="dark";
+
   return (
-    <div className="min-h-screen relative">
-      <div className="glow-bg"/><div className="glow-bg-2"/>
-      {showModal && <AddTransactionModal onClose={()=>setShowModal(false)} onAdd={handleAddTransaction}/>}
+    <div className="min-h-screen relative" style={{background:isDark?"#050810":"#f0fdf4"}}>
+      {isDark&&<><div className="glow-bg"/><div className="glow-bg-2"/></>}
+      <NotificationToast notifications={notifications} onDismiss={i=>setNotifications(p=>p.filter((_,idx)=>idx!==i))}/>
+      {showModal&&<AddTransactionModal onClose={()=>setShowModal(false)} onAdd={fetchData}/>}
 
       <div className="flex min-h-screen relative z-10">
         {/* Sidebar */}
-        <aside className="hidden md:flex flex-col w-60 p-5 gap-2 border-r border-white/5">
+        <aside className="hidden md:flex flex-col w-60 p-5 gap-2 border-r" style={{borderColor:"rgba(255,255,255,0.05)",background:isDark?"transparent":LIGHT.sidebar}}>
           <div className="flex items-center gap-2.5 px-2 mb-6 mt-1">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center flex-shrink-0">
               <span className="text-white font-bold" style={{fontFamily:"Syne"}}>M</span>
             </div>
-            <span className="text-lg font-bold text-white" style={{fontFamily:"Syne"}}>Mind<span className="text-green-400">Money</span></span>
+            <span className="text-lg font-bold" style={{fontFamily:"Syne",color:isDark?"white":"#0f172a"}}>Mind<span className="text-green-400">Money</span></span>
           </div>
-          {navItems.map(item => (
+          {navItems.map(item=>(
             <button key={item.id} onClick={()=>setActiveTab(item.id)}
               className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 text-left"
-              style={{fontFamily:"DM Sans", background:activeTab===item.id?"rgba(74,222,128,0.1)":"transparent", color:activeTab===item.id?"#4ade80":"#64748b", borderLeft:activeTab===item.id?"2px solid #4ade80":"2px solid transparent"}}>
+              style={{fontFamily:"DM Sans",background:activeTab===item.id?"rgba(74,222,128,0.1)":"transparent",color:activeTab===item.id?"#4ade80":isDark?"#64748b":"#475569",borderLeft:activeTab===item.id?"2px solid #4ade80":"2px solid transparent"}}>
               <span className="text-base">{item.icon}</span>{item.label}
             </button>
           ))}
@@ -707,24 +628,30 @@ export default function App() {
           <button className="btn-primary w-full py-2.5 flex items-center justify-center gap-2 text-sm" onClick={()=>setShowModal(true)}>
             <span className="text-lg leading-none">+</span> Nova Transação
           </button>
-          <div className="mt-3 px-3 py-3 rounded-xl bg-slate-900/50 border border-white/5">
-            <p className="text-xs font-semibold text-white truncate">{user.name}</p>
+          <div className="mt-3 px-3 py-3 rounded-xl border" style={{background:isDark?"rgba(15,23,42,0.5)":"rgba(0,0,0,0.05)",borderColor:"rgba(255,255,255,0.05)"}}>
+            <p className="text-xs font-semibold truncate" style={{color:isDark?"white":"#0f172a"}}>{user.name}</p>
             <p className="text-xs text-slate-500 truncate">{user.email}</p>
-            <button onClick={handleLogout} className="text-xs text-slate-500 hover:text-red-400 transition-colors mt-1.5">Sair →</button>
+            <div className="flex items-center gap-3 mt-1.5">
+              <button onClick={()=>setTheme(t=>t==="dark"?"light":"dark")} className="text-xs text-slate-500 hover:text-yellow-400 transition-colors">{isDark?"☀️":"🌙"}</button>
+              <button onClick={handleLogout} className="text-xs text-slate-500 hover:text-red-400 transition-colors">Sair →</button>
+            </div>
           </div>
         </aside>
 
         {/* Main */}
         <main className="flex-1 p-5 md:p-8 overflow-auto">
           <div className="flex items-center justify-between mb-6 md:hidden">
-            <span className="text-lg font-bold text-white" style={{fontFamily:"Syne"}}>Mind<span className="text-green-400">Money</span></span>
-            <button className="btn-primary py-2 px-4 text-sm" onClick={()=>setShowModal(true)}>+ Novo</button>
+            <span className="text-lg font-bold" style={{fontFamily:"Syne",color:isDark?"white":"#0f172a"}}>Mind<span className="text-green-400">Money</span></span>
+            <div className="flex items-center gap-2">
+              <button onClick={()=>setTheme(t=>t==="dark"?"light":"dark")} className="w-8 h-8 rounded-lg flex items-center justify-center text-lg" style={{background:"rgba(255,255,255,0.05)"}}>{isDark?"☀️":"🌙"}</button>
+              <button className="btn-primary py-2 px-4 text-sm" onClick={()=>setShowModal(true)}>+ Novo</button>
+            </div>
           </div>
 
           {/* Mobile bottom nav */}
-          <div className="fixed bottom-0 left-0 right-0 md:hidden z-20 border-t border-white/5" style={{background:"rgba(5,8,16,0.95)",backdropFilter:"blur(12px)"}}>
+          <div className="fixed bottom-0 left-0 right-0 md:hidden z-20 border-t" style={{borderColor:"rgba(255,255,255,0.05)",background:isDark?"rgba(5,8,16,0.95)":"rgba(240,253,244,0.97)",backdropFilter:"blur(12px)"}}>
             <div className="flex">
-              {navItems.map(item => (
+              {navItems.map(item=>(
                 <button key={item.id} onClick={()=>setActiveTab(item.id)}
                   className="flex-1 flex flex-col items-center gap-1 py-2 text-xs transition-colors"
                   style={{color:activeTab===item.id?"#4ade80":"#475569"}}>
@@ -735,36 +662,19 @@ export default function App() {
             </div>
           </div>
 
-          {/* ── DASHBOARD ── */}
-          {activeTab==="dashboard" && (
+          {/* DASHBOARD */}
+          {activeTab==="dashboard"&&(
             <div className="pb-20 md:pb-0">
               <div className="flex items-start justify-between mb-5 animate-fade-up">
-                <div>
-                  <p className="text-slate-400 text-sm mb-0.5">Bem-vindo de volta,</p>
-                  <h1 className="text-2xl font-bold text-white">{user.name} 👋</h1>
-                </div>
-                {summary && (
-                  <button
-                    onClick={() => exportPDF(user, summary, transactions, filters)}
-                    className="btn-ghost flex items-center gap-2 text-sm"
-                    title="Exportar relatório PDF"
-                  >
-                    <span>📤</span> Exportar PDF
-                  </button>
-                )}
+                <div><p className="text-slate-400 text-sm mb-0.5">Bem-vindo de volta,</p><h1 className="text-2xl font-bold" style={{color:isDark?"white":"#0f172a"}}>{user.name} 👋</h1></div>
+                {summary&&<button onClick={()=>exportPDF(user,summary,transactions,filters)} className="btn-ghost flex items-center gap-2 text-sm"><span>📤</span> Exportar PDF</button>}
               </div>
               <PeriodFilter filters={filters} onChange={setFilters}/>
-              {loadingData ? (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">{[0,1,2].map(i=><div key={i} className="glass-card p-5 h-24 animate-pulse"/>)}</div>
-              ) : summary && (
+              {loadingData?(<div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">{[0,1,2].map(i=><div key={i} className="glass-card p-5 h-24 animate-pulse"/>)}</div>):summary&&(
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-                    {[
-                      {label:"Saldo Total",value:summary.balance,color:summary.balance>=0?"#4ade80":"#f87171",sub:"Receitas - Gastos"},
-                      {label:"Total Receitas",value:summary.totalIncome,color:"#4ade80",sub:"No período"},
-                      {label:"Total Gastos",value:summary.totalExpenses,color:"#f87171",sub:"No período"},
-                    ].map((card,i) => (
-                      <div key={i} className={`glass-card glass-card-hover p-5 animate-fade-up stagger-${i+1}`}>
+                    {[{label:"Saldo Total",value:summary.balance,color:summary.balance>=0?"#4ade80":"#f87171",sub:"Receitas - Gastos"},{label:"Total Receitas",value:summary.totalIncome,color:"#4ade80",sub:"No período"},{label:"Total Gastos",value:summary.totalExpenses,color:"#f87171",sub:"No período"}].map((card,i)=>(
+                      <div key={i} className={`glass-card glass-card-hover p-5 animate-fade-up stagger-${i+1}`} style={{background:isDark?undefined:"rgba(255,255,255,0.8)"}}>
                         <p className="label">{card.label}</p>
                         <p className="text-2xl font-bold mt-1" style={{color:card.color,fontFamily:"Syne"}}>{fmt(card.value)}</p>
                         <p className="text-xs text-slate-500 mt-1">{card.sub}</p>
@@ -773,44 +683,28 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
                     <div className="glass-card p-5 lg:col-span-2 animate-fade-up stagger-3">
-                      <h3 className="font-bold text-white mb-4 text-sm">Evolução Mensal</h3>
+                      <h3 className="font-bold mb-4 text-sm" style={{color:isDark?"white":"#0f172a"}}>Evolução Mensal</h3>
                       <ResponsiveContainer width="100%" height={200}>
                         <AreaChart data={summary.monthlyData}>
                           <defs>
-                            <linearGradient id="colorReceitas" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#4ade80" stopOpacity={0.3}/><stop offset="95%" stopColor="#4ade80" stopOpacity={0}/></linearGradient>
-                            <linearGradient id="colorGastos" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f87171" stopOpacity={0.3}/><stop offset="95%" stopColor="#f87171" stopOpacity={0}/></linearGradient>
+                            <linearGradient id="cR" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#4ade80" stopOpacity={0.3}/><stop offset="95%" stopColor="#4ade80" stopOpacity={0}/></linearGradient>
+                            <linearGradient id="cG" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f87171" stopOpacity={0.3}/><stop offset="95%" stopColor="#f87171" stopOpacity={0}/></linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
                           <XAxis dataKey="month" tick={{fill:"#475569",fontSize:11}} axisLine={false} tickLine={false}/>
                           <YAxis tick={{fill:"#475569",fontSize:11}} axisLine={false} tickLine={false} tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`}/>
                           <Tooltip content={<CustomTooltip/>}/>
-                          <Area type="monotone" dataKey="receitas" name="Receitas" stroke="#4ade80" fill="url(#colorReceitas)" strokeWidth={2} dot={false}/>
-                          <Area type="monotone" dataKey="gastos" name="Gastos" stroke="#f87171" fill="url(#colorGastos)" strokeWidth={2} dot={false}/>
+                          <Area type="monotone" dataKey="receitas" name="Receitas" stroke="#4ade80" fill="url(#cR)" strokeWidth={2} dot={false}/>
+                          <Area type="monotone" dataKey="gastos" name="Gastos" stroke="#f87171" fill="url(#cG)" strokeWidth={2} dot={false}/>
                         </AreaChart>
                       </ResponsiveContainer>
                     </div>
                     <div className="glass-card p-5 animate-fade-up stagger-4">
-                      <h3 className="font-bold text-white mb-4 text-sm">Gastos por Categoria</h3>
-                      {summary.categoryData.length > 0 ? (
-                        <>
-                          <ResponsiveContainer width="100%" height={140}>
-                            <PieChart>
-                              <Pie data={summary.categoryData} cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={3} dataKey="value">
-                                {summary.categoryData.map((entry,i) => <Cell key={i} fill={CATEGORY_COLORS[entry.name]||pieColors[i%pieColors.length]}/>)}
-                              </Pie>
-                              <Tooltip formatter={v=>fmt(v)}/>
-                            </PieChart>
-                          </ResponsiveContainer>
-                          <div className="space-y-1.5 mt-2">
-                            {summary.categoryData.slice(0,4).map((cat,i) => (
-                              <div key={i} className="flex items-center justify-between text-xs">
-                                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full" style={{background:CATEGORY_COLORS[cat.name]||pieColors[i]}}/><span className="text-slate-400">{cat.name}</span></div>
-                                <span className="text-slate-300 font-medium">{fmt(cat.value)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      ) : <p className="text-slate-500 text-sm text-center py-8">Sem dados de gastos</p>}
+                      <h3 className="font-bold mb-4 text-sm" style={{color:isDark?"white":"#0f172a"}}>Gastos por Categoria</h3>
+                      {summary.categoryData.length>0?(
+                        <><ResponsiveContainer width="100%" height={140}><PieChart><Pie data={summary.categoryData} cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={3} dataKey="value">{summary.categoryData.map((e,i)=><Cell key={i} fill={CATEGORY_COLORS[e.name]||pieColors[i%pieColors.length]}/>)}</Pie><Tooltip formatter={v=>fmt(v)}/></PieChart></ResponsiveContainer>
+                        <div className="space-y-1.5 mt-2">{summary.categoryData.slice(0,4).map((cat,i)=><div key={i} className="flex items-center justify-between text-xs"><div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full" style={{background:CATEGORY_COLORS[cat.name]||pieColors[i]}}/><span className="text-slate-400">{cat.name}</span></div><span className="text-slate-300 font-medium">{fmt(cat.value)}</span></div>)}</div></>
+                      ):<p className="text-slate-500 text-sm text-center py-8">Sem dados de gastos</p>}
                     </div>
                   </div>
                   <InsightCard insight={summary.insight}/>
@@ -819,34 +713,26 @@ export default function App() {
             </div>
           )}
 
-          {/* ── TRANSACTIONS ── */}
-          {activeTab==="transactions" && (
+          {/* TRANSACTIONS */}
+          {activeTab==="transactions"&&(
             <div className="pb-20 md:pb-0">
               <div className="flex items-center justify-between mb-5 animate-fade-up">
-                <div><h1 className="text-2xl font-bold text-white">Transações</h1><p className="text-slate-400 text-sm mt-0.5">{transactions.length} registros</p></div>
+                <div><h1 className="text-2xl font-bold" style={{color:isDark?"white":"#0f172a"}}>Transações</h1><p className="text-slate-400 text-sm mt-0.5">{transactions.length} registros</p></div>
                 <div className="hidden md:flex items-center gap-2">
-                  {summary && transactions.length > 0 && (
-                    <button onClick={() => exportPDF(user, summary, transactions, filters)} className="btn-ghost flex items-center gap-2 text-sm">
-                      <span>📤</span> PDF
-                    </button>
-                  )}
+                  {summary&&transactions.length>0&&<button onClick={()=>exportPDF(user,summary,transactions,filters)} className="btn-ghost flex items-center gap-2 text-sm"><span>📤</span> PDF</button>}
                   <button className="btn-primary flex items-center gap-2" onClick={()=>setShowModal(true)}><span className="text-lg leading-none">+</span> Adicionar</button>
                 </div>
               </div>
               <PeriodFilter filters={filters} onChange={setFilters}/>
-              {loadingData ? (
-                <div className="space-y-3">{[0,1,2,3].map(i=><div key={i} className="glass-card h-16 animate-pulse"/>)}</div>
-              ) : transactions.length === 0 ? (
-                <div className="glass-card p-10 text-center animate-fade-up"><p className="text-4xl mb-3">📭</p><p className="text-white font-semibold">Nenhuma transação no período</p><p className="text-slate-400 text-sm mt-1">Tente mudar o filtro de período</p></div>
-              ) : (
+              {loadingData?(<div className="space-y-3">{[0,1,2,3].map(i=><div key={i} className="glass-card h-16 animate-pulse"/>)}</div>):transactions.length===0?(
+                <div className="glass-card p-10 text-center animate-fade-up"><p className="text-4xl mb-3">📭</p><p className="font-semibold" style={{color:isDark?"white":"#0f172a"}}>Nenhuma transação no período</p></div>
+              ):(
                 <div className="space-y-2 animate-fade-up">
-                  {transactions.map(tx => (
-                    <div key={tx.id} className="glass-card glass-card-hover p-4 flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{background:`${CATEGORY_COLORS[tx.category]||"#94a3b8"}20`}}>
-                        {tx.type==="income"?"💰":"💸"}
-                      </div>
+                  {transactions.map(tx=>(
+                    <div key={tx.id} className="glass-card glass-card-hover p-4 flex items-center gap-4" style={{background:isDark?undefined:"rgba(255,255,255,0.8)"}}>
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{background:`${CATEGORY_COLORS[tx.category]||"#94a3b8"}20`}}>{tx.type==="income"?"💰":"💸"}</div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-white font-medium text-sm truncate">{tx.description||tx.category}</p>
+                        <p className="font-medium text-sm truncate" style={{color:isDark?"white":"#0f172a"}}>{tx.description||tx.category}</p>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="tag" style={{background:`${CATEGORY_COLORS[tx.category]||"#94a3b8"}20`,color:CATEGORY_COLORS[tx.category]||"#94a3b8"}}>{tx.category}</span>
                           <span className="text-xs text-slate-500">{new Date(tx.date+"T00:00:00").toLocaleDateString("pt-BR")}</span>
@@ -863,75 +749,52 @@ export default function App() {
             </div>
           )}
 
-          {/* ── GOALS ── */}
-          {activeTab==="goals" && <GoalsTab/>}
+          {activeTab==="goals"&&<GoalsTab/>}
+          {activeTab==="alerts"&&<AlertsTab summary={summary}/>}
 
-          {/* ── ALERTS ── */}
-          {activeTab==="alerts" && <AlertsTab summary={summary}/>}
-
-          {/* ── INSIGHTS ── */}
-          {activeTab==="insights" && (
+          {/* INSIGHTS */}
+          {activeTab==="insights"&&(
             <div className="pb-20 md:pb-0">
-              <div className="mb-5 animate-fade-up">
-                <h1 className="text-2xl font-bold text-white">IA Insights</h1>
-                <p className="text-slate-400 text-sm mt-0.5">Análise comportamental dos seus gastos</p>
-              </div>
+              <div className="mb-5 animate-fade-up"><h1 className="text-2xl font-bold" style={{color:isDark?"white":"#0f172a"}}>IA Insights</h1><p className="text-slate-400 text-sm mt-0.5">Análise comportamental dos seus gastos</p></div>
               <PeriodFilter filters={filters} onChange={setFilters}/>
-              {summary ? (
+              {summary?(
                 <div className="space-y-4">
                   <InsightCard insight={summary.insight}/>
                   <div className="glass-card p-5 animate-fade-up stagger-2">
-                    <h3 className="font-bold text-white mb-4">📊 Análise por Categoria</h3>
+                    <h3 className="font-bold mb-4" style={{color:isDark?"white":"#0f172a"}}>📊 Análise por Categoria</h3>
                     <div className="space-y-3">
-                      {summary.categoryData.length > 0 ? summary.categoryData.map((cat,i) => {
-                        const pct = summary.totalExpenses > 0 ? ((cat.value/summary.totalExpenses)*100).toFixed(1) : 0;
-                        return (
-                          <div key={i}>
-                            <div className="flex justify-between text-sm mb-1">
-                              <span className="text-slate-300 flex items-center gap-2"><span className="w-2 h-2 rounded-full inline-block" style={{background:CATEGORY_COLORS[cat.name]||"#94a3b8"}}/>{cat.name}</span>
-                              <span className="text-slate-400 font-medium">{fmt(cat.value)} <span className="text-slate-500">({pct}%)</span></span>
-                            </div>
-                            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                              <div className="h-full rounded-full transition-all duration-700" style={{width:`${pct}%`,background:CATEGORY_COLORS[cat.name]||"#94a3b8"}}/>
-                            </div>
-                          </div>
-                        );
-                      }) : <p className="text-slate-500 text-sm">Sem dados de gastos para analisar.</p>}
+                      {summary.categoryData.length>0?summary.categoryData.map((cat,i)=>{
+                        const pct=summary.totalExpenses>0?((cat.value/summary.totalExpenses)*100).toFixed(1):0;
+                        return(<div key={i}><div className="flex justify-between text-sm mb-1"><span className="text-slate-300 flex items-center gap-2"><span className="w-2 h-2 rounded-full inline-block" style={{background:CATEGORY_COLORS[cat.name]||"#94a3b8"}}/>{cat.name}</span><span className="text-slate-400 font-medium">{fmt(cat.value)} <span className="text-slate-500">({pct}%)</span></span></div><div className="h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full rounded-full transition-all duration-700" style={{width:`${pct}%`,background:CATEGORY_COLORS[cat.name]||"#94a3b8"}}/></div></div>);
+                      }):<p className="text-slate-500 text-sm">Sem dados de gastos.</p>}
                     </div>
                   </div>
                   <div className="glass-card p-5 animate-fade-up stagger-3">
-                    <h3 className="font-bold text-white mb-3">💡 Taxa de Poupança</h3>
-                    {summary.totalIncome > 0 ? (
-                      <>
-                        <div className="flex items-end gap-2 mb-2">
-                          <span className="text-4xl font-bold text-green-400" style={{fontFamily:"Syne"}}>{(((summary.totalIncome-summary.totalExpenses)/summary.totalIncome)*100).toFixed(1)}%</span>
-                          <span className="text-slate-400 text-sm mb-1">da renda</span>
-                        </div>
-                        <p className="text-slate-400 text-sm">
-                          {(((summary.totalIncome-summary.totalExpenses)/summary.totalIncome)*100)>=20 ? "✅ Excelente! Você está acima da meta de 20% de poupança." : (((summary.totalIncome-summary.totalExpenses)/summary.totalIncome)*100)>=10 ? "⚡ Poupando, mas pode melhorar. Meta: 20% da renda." : "⚠️ Taxa abaixo do recomendado (20%)."}
-                        </p>
-                      </>
-                    ) : <p className="text-slate-500 text-sm">Adicione receitas para calcular sua taxa de poupança.</p>}
+                    <h3 className="font-bold mb-3" style={{color:isDark?"white":"#0f172a"}}>💡 Taxa de Poupança</h3>
+                    {summary.totalIncome>0?(<><div className="flex items-end gap-2 mb-2"><span className="text-4xl font-bold text-green-400" style={{fontFamily:"Syne"}}>{(((summary.totalIncome-summary.totalExpenses)/summary.totalIncome)*100).toFixed(1)}%</span><span className="text-slate-400 text-sm mb-1">da renda</span></div><p className="text-slate-400 text-sm">{(((summary.totalIncome-summary.totalExpenses)/summary.totalIncome)*100)>=20?"✅ Excelente! Acima da meta de 20%.":(((summary.totalIncome-summary.totalExpenses)/summary.totalIncome)*100)>=10?"⚡ Poupando, mas pode melhorar.":"⚠️ Abaixo do recomendado (20%)."}</p></>):<p className="text-slate-500 text-sm">Adicione receitas para calcular.</p>}
                   </div>
-                  {summary.categoryData.length > 0 && (
+                  {summary.categoryData.length>0&&(
                     <div className="glass-card p-5 animate-fade-up stagger-4">
-                      <h3 className="font-bold text-white mb-4">📈 Distribuição de Gastos</h3>
+                      <h3 className="font-bold mb-4" style={{color:isDark?"white":"#0f172a"}}>📈 Distribuição de Gastos</h3>
                       <ResponsiveContainer width="100%" height={200}>
                         <BarChart data={summary.categoryData} barSize={28}>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false}/>
                           <XAxis dataKey="name" tick={{fill:"#475569",fontSize:10}} axisLine={false} tickLine={false}/>
                           <YAxis tick={{fill:"#475569",fontSize:11}} axisLine={false} tickLine={false} tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`}/>
                           <Tooltip content={<CustomTooltip/>}/>
-                          <Bar dataKey="value" name="Gasto" radius={[6,6,0,0]}>
-                            {summary.categoryData.map((entry,i) => <Cell key={i} fill={CATEGORY_COLORS[entry.name]||pieColors[i%pieColors.length]}/>)}
-                          </Bar>
+                          <Bar dataKey="value" name="Gasto" radius={[6,6,0,0]}>{summary.categoryData.map((e,i)=><Cell key={i} fill={CATEGORY_COLORS[e.name]||pieColors[i%pieColors.length]}/>)}</Bar>
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
                   )}
                 </div>
-              ) : <div className="glass-card p-10 text-center animate-fade-up"><p className="text-4xl mb-3">🤖</p><p className="text-white font-semibold">Carregando insights...</p></div>}
+              ):<div className="glass-card p-10 text-center animate-fade-up"><p className="text-4xl mb-3">🤖</p><p className="text-white font-semibold">Carregando...</p></div>}
             </div>
+          )}
+
+          {/* PROFILE */}
+          {activeTab==="profile"&&(
+            <ProfileTab user={user} onUpdate={u=>{setUser(u);}} onLogout={handleLogout} theme={theme} onThemeToggle={()=>setTheme(t=>t==="dark"?"light":"dark")}/>
           )}
         </main>
       </div>
