@@ -1215,31 +1215,71 @@ export default function App() {
       {editingTx&&<EditTransactionModal transaction={editingTx} onClose={()=>setEditingTx(null)} onSave={()=>{setEditingTx(null);fetchData();}}/>}
 
       <div className="flex min-h-screen relative z-10">
-        {/* Sidebar */}
-        <aside className="hidden md:flex flex-col w-60 p-5 gap-2 border-r" style={{borderColor:"rgba(255,255,255,0.05)",background:isDark?"transparent":LIGHT.sidebar}}>
-          <div className="flex items-center gap-2.5 px-2 mb-6 mt-1">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-bold" style={{fontFamily:"Syne"}}>M</span>
-            </div>
-            <span className="text-lg font-bold" style={{fontFamily:"Syne",color:isDark?"white":"#0f172a"}}>Mind<span className="text-green-400">Money</span></span>
+        {/* Sidebar — icon only */}
+        <aside className="hidden md:flex flex-col items-center w-16 py-5 gap-1 border-r flex-shrink-0" style={{borderColor:"rgba(255,255,255,0.05)",background:isDark?"rgba(5,8,16,0.6)":LIGHT.sidebar}}>
+          {/* Logo */}
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center mb-5 flex-shrink-0">
+            <span className="text-white font-bold text-base" style={{fontFamily:"Syne"}}>M</span>
           </div>
+
+          {/* Nav icons */}
           {navItems.map(item=>(
-            <button key={item.id} onClick={()=>setActiveTab(item.id)}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 text-left"
-              style={{fontFamily:"DM Sans",background:activeTab===item.id?"rgba(74,222,128,0.1)":"transparent",color:activeTab===item.id?"#4ade80":isDark?"#64748b":"#475569",borderLeft:activeTab===item.id?"2px solid #4ade80":"2px solid transparent"}}>
-              <span className="text-base">{item.icon}</span>{item.label}
-            </button>
+            <div key={item.id} className="relative group w-full flex justify-center">
+              <button onClick={()=>setActiveTab(item.id)}
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-all duration-200"
+                style={{background:activeTab===item.id?"rgba(74,222,128,0.15)":"transparent", color:activeTab===item.id?"#4ade80":isDark?"#64748b":"#94a3b8", boxShadow:activeTab===item.id?"inset 0 0 0 1.5px rgba(74,222,128,0.4)":"none"}}>
+                {item.icon}
+              </button>
+              {/* Tooltip */}
+              <div className="absolute left-14 top-1/2 -translate-y-1/2 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                <div className="px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap" style={{background:isDark?"rgba(15,23,42,0.95)":"rgba(255,255,255,0.95)", color:isDark?"#e2e8f0":"#0f172a", border:"1px solid rgba(255,255,255,0.08)", boxShadow:"0 4px 12px rgba(0,0,0,0.3)"}}>
+                  {item.label}
+                </div>
+              </div>
+            </div>
           ))}
+
           <div className="flex-1"/>
-          <button className="btn-primary w-full py-2.5 flex items-center justify-center gap-2 text-sm" onClick={()=>setShowModal(true)}>
-            <span className="text-lg leading-none">+</span> Nova Transação
-          </button>
-          <div className="mt-3 px-3 py-3 rounded-xl border" style={{background:isDark?"rgba(15,23,42,0.5)":"rgba(0,0,0,0.05)",borderColor:"rgba(255,255,255,0.05)"}}>
-            <p className="text-xs font-semibold truncate" style={{color:isDark?"white":"#0f172a"}}>{user.name}</p>
-            <p className="text-xs text-slate-500 truncate">{user.email}</p>
-            <div className="flex items-center gap-3 mt-1.5">
-              <button onClick={()=>setTheme(t=>t==="dark"?"light":"dark")} className="text-xs text-slate-500 hover:text-yellow-400 transition-colors">{isDark?"☀️":"🌙"}</button>
-              <button onClick={handleLogout} className="text-xs text-slate-500 hover:text-red-400 transition-colors">Sair →</button>
+
+          {/* Add button */}
+          <div className="relative group w-full flex justify-center mb-1">
+            <button onClick={()=>setShowModal(true)}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-xl font-bold transition-all duration-200"
+              style={{background:"linear-gradient(135deg,#22c55e,#16a34a)", color:"white", boxShadow:"0 4px 12px rgba(34,197,94,0.3)"}}>
+              +
+            </button>
+            <div className="absolute left-14 top-1/2 -translate-y-1/2 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <div className="px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap" style={{background:isDark?"rgba(15,23,42,0.95)":"rgba(255,255,255,0.95)", color:isDark?"#e2e8f0":"#0f172a", border:"1px solid rgba(255,255,255,0.08)", boxShadow:"0 4px 12px rgba(0,0,0,0.3)"}}>
+                Nova Transação
+              </div>
+            </div>
+          </div>
+
+          {/* Theme + Logout */}
+          <div className="relative group w-full flex justify-center">
+            <button onClick={()=>setTheme(t=>t==="dark"?"light":"dark")}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-all duration-200 hover:bg-white/5">
+              {isDark?"☀️":"🌙"}
+            </button>
+            <div className="absolute left-14 top-1/2 -translate-y-1/2 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <div className="px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap" style={{background:isDark?"rgba(15,23,42,0.95)":"rgba(255,255,255,0.95)", color:isDark?"#e2e8f0":"#0f172a", border:"1px solid rgba(255,255,255,0.08)", boxShadow:"0 4px 12px rgba(0,0,0,0.3)"}}>
+                {isDark?"Modo Claro":"Modo Escuro"}
+              </div>
+            </div>
+          </div>
+
+          <div className="relative group w-full flex justify-center mt-1">
+            <button onClick={()=>setActiveTab("profile")}
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-lg transition-all duration-200 hover:bg-white/5"
+              style={{background:activeTab==="profile"?"rgba(74,222,128,0.15)":"transparent"}}>
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center">
+                <span className="text-white text-xs font-bold" style={{fontFamily:"Syne"}}>{user.name[0].toUpperCase()}</span>
+              </div>
+            </button>
+            <div className="absolute left-14 top-1/2 -translate-y-1/2 z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <div className="px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap" style={{background:isDark?"rgba(15,23,42,0.95)":"rgba(255,255,255,0.95)", color:isDark?"#e2e8f0":"#0f172a", border:"1px solid rgba(255,255,255,0.08)", boxShadow:"0 4px 12px rgba(0,0,0,0.3)"}}>
+                {user.name}
+              </div>
             </div>
           </div>
         </aside>
