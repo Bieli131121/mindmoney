@@ -476,6 +476,238 @@ function ProfileTab({ user, onUpdate, onLogout, theme, onThemeToggle }) {
   );
 }
 
+
+// ── Cards Tab ─────────────────────────────────────────────────────────────────
+const CARD_COLORS = ["#818cf8","#f472b6","#fb923c","#34d399","#38bdf8","#fbbf24","#a78bfa","#f87171"];
+
+function CardsTab() {
+  const [cards, setCards] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [selectedCard, setSelectedCard] = useState(null);
+  const [cardData, setCardData] = useState(null);
+  const [showTxForm, setShowTxForm] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0,7));
+  const [form, setForm] = useState({name:"",limit_amount:"",closing_day:"",due_day:"",color:"#818cf8"});
+  const [txForm, setTxForm] = useState({amount:"",category:"Alimentação",description:"",date:new Date().toISOString().split("T")[0]});
+  const [loadingCard, setLoadingCard] = useState(false);
+
+  useEffect(() => { api.get("/api/cards").then(r => setCards(r.data)).catch(()=>{}); }, []);
+
+  const loadCardData = async (card, month) => {
+    setLoadingCard(true);
+    try {
+      const { data } = await api.get(`/api/cards/${card.id}/transactions`, { params: { month } });
+      setCardData(data);
+    } catch {}
+    finally { setLoadingCard(false); }
+  };
+
+  const handleSelectCard = (card) => {
+    setSelectedCard(card);
+    loadCardData(card, selectedMonth);
+  };
+
+  const handleMonthChange = (month) => {
+    setSelectedMonth(month);
+    if (selectedCard) loadCardData(selectedCard, month);
+  };
+
+  const handleAddCard = async (e) => {
+    e.preventDefault();
+    const { data } = await api.post("/api/cards", form);
+    setCards(p => [data, ...p]);
+    setShowForm(false);
+    setForm({name:"",limit_amount:"",closing_day:"",due_day:"",color:"#818cf8"});
+  };
+
+  const handleDeleteCard = async (id) => {
+    if (!confirm("Excluir cartão e todas as transações?")) return;
+    await api.delete(`/api/cards/${id}`);
+    setCards(p => p.filter(c => c.id !== id));
+    if (selectedCard?.id === id) { setSelectedCard(null); setCardData(null); }
+  };
+
+  const handleAddTx = async (e) => {
+    e.preventDefault();
+    await api.post(`/api/cards/${selectedCard.id}/transactions`, txForm);
+    setShowTxForm(false);
+    setTxForm({amount:"",category:"Alimentação",description:"",date:new Date().toISOString().split("T")[0]});
+    loadCardData(selectedCard, selectedMonth);
+  };
+
+  const handleDeleteTx = async (txId) => {
+    await api.delete(`/api/cards/${selectedCard.id}/transactions/${txId}`);
+    loadCardData(selectedCard, selectedMonth);
+  };
+
+  const usedPct = cardData ? Math.min((cardData.total / cardData.card.limit_amount) * 100, 100) : 0;
+  const isOver80 = usedPct >= 80;
+  const isOver100 = usedPct >= 100;
+
+  return (
+    <div className="pb-20 md:pb-0">
+      <div className="flex items-center justify-between mb-6 animate-fade-up">
+        <div>
+          <h1 className="text-2xl font-bold text-white">💳 Cartões de Crédito</h1>
+          <p className="text-slate-400 text-sm mt-0.5">{cards.length} cartão(ões) cadastrado(s)</p>
+        </div>
+        <button className="btn-primary flex items-center gap-2" onClick={() => setShowForm(!showForm)}>
+          <span className="text-lg leading-none">+</span> Novo Cartão
+        </button>
+      </div>
+
+      {/* Add Card Form */}
+      {showForm && (
+        <div className="glass-card p-5 mb-5 animate-fade-up">
+          <h3 className="font-bold text-white mb-4">Novo Cartão</h3>
+          <form onSubmit={handleAddCard} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Nome do Cartão</label><input className="input-field" placeholder="Ex: Nubank" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} required/></div>
+              <div><label className="label">Limite (R$)</label><input className="input-field" type="number" min="1" step="0.01" placeholder="5000" value={form.limit_amount} onChange={e=>setForm({...form,limit_amount:e.target.value})} required/></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Dia de Fechamento</label><input className="input-field" type="number" min="1" max="31" placeholder="15" value={form.closing_day} onChange={e=>setForm({...form,closing_day:e.target.value})} required/></div>
+              <div><label className="label">Dia de Vencimento</label><input className="input-field" type="number" min="1" max="31" placeholder="22" value={form.due_day} onChange={e=>setForm({...form,due_day:e.target.value})} required/></div>
+            </div>
+            <div>
+              <label className="label">Cor do Cartão</label>
+              <div className="flex gap-2 mt-1">
+                {CARD_COLORS.map(c => (
+                  <button key={c} type="button" onClick={() => setForm({...form,color:c})}
+                    className="w-7 h-7 rounded-full transition-all duration-200"
+                    style={{background:c, outline:form.color===c?"3px solid white":"none", outlineOffset:"2px"}}/>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button type="button" className="btn-ghost flex-1" onClick={()=>setShowForm(false)}>Cancelar</button>
+              <button type="submit" className="btn-primary flex-1">Adicionar Cartão</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+        {cards.length === 0 ? (
+          <div className="glass-card p-10 text-center col-span-2 animate-fade-up">
+            <p className="text-4xl mb-3">💳</p>
+            <p className="text-white font-semibold">Nenhum cartão cadastrado</p>
+            <p className="text-slate-400 text-sm mt-1">Adicione seu primeiro cartão de crédito!</p>
+          </div>
+        ) : cards.map(card => (
+          <div key={card.id}
+            className="glass-card-hover rounded-2xl p-5 cursor-pointer transition-all duration-200 border"
+            style={{background:`linear-gradient(135deg, ${card.color}22, ${card.color}11)`, borderColor:selectedCard?.id===card.id?card.color:"rgba(255,255,255,0.08)"}}
+            onClick={() => handleSelectCard(card)}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <p className="font-bold text-white text-lg" style={{fontFamily:"Syne"}}>{card.name}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Fecha dia {card.closing_day} · Vence dia {card.due_day}</p>
+              </div>
+              <button onClick={e=>{e.stopPropagation();handleDeleteCard(card.id);}} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-600 hover:text-red-400 hover:bg-red-400/10 transition-colors text-sm">✕</button>
+            </div>
+            <div className="flex justify-between items-end">
+              <div>
+                <p className="text-xs text-slate-500 mb-0.5">Limite total</p>
+                <p className="text-xl font-bold" style={{color:card.color, fontFamily:"Syne"}}>{fmt(card.limit_amount)}</p>
+              </div>
+              <div className="w-8 h-8 rounded-full border-2 flex items-center justify-center" style={{borderColor:card.color}}>
+                <span style={{color:card.color, fontSize:14}}>💳</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Card Detail */}
+      {selectedCard && (
+        <div className="glass-card p-5 animate-fade-up">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold text-white text-lg" style={{fontFamily:"Syne"}}>{selectedCard.name}</h3>
+              <p className="text-xs text-slate-400">Fatura de {selectedMonth}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="month" className="input-field text-xs py-1.5" style={{width:140}} value={selectedMonth} onChange={e=>handleMonthChange(e.target.value)}/>
+              <button className="btn-primary py-2 px-3 text-xs flex items-center gap-1" onClick={()=>setShowTxForm(!showTxForm)}>
+                <span>+</span> Lançamento
+              </button>
+            </div>
+          </div>
+
+          {/* Add Transaction Form */}
+          {showTxForm && (
+            <form onSubmit={handleAddTx} className="bg-slate-900/50 rounded-xl p-4 mb-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="label">Valor (R$)</label><input className="input-field" type="number" step="0.01" min="0.01" placeholder="0,00" value={txForm.amount} onChange={e=>setTxForm({...txForm,amount:e.target.value})} required/></div>
+                <div><label className="label">Data</label><input className="input-field" type="date" value={txForm.date} onChange={e=>setTxForm({...txForm,date:e.target.value})} required/></div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="label">Categoria</label>
+                  <select className="input-field" value={txForm.category} onChange={e=>setTxForm({...txForm,category:e.target.value})}>
+                    {EXPENSE_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div><label className="label">Descrição</label><input className="input-field" placeholder="Ex: Restaurante" value={txForm.description} onChange={e=>setTxForm({...txForm,description:e.target.value})}/></div>
+              </div>
+              <div className="flex gap-3">
+                <button type="button" className="btn-ghost flex-1 text-sm" onClick={()=>setShowTxForm(false)}>Cancelar</button>
+                <button type="submit" className="btn-primary flex-1 text-sm">Adicionar</button>
+              </div>
+            </form>
+          )}
+
+          {/* Usage Bar */}
+          {cardData && !loadingCard && (
+            <>
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-slate-400">Fatura atual</span>
+                <span className="font-bold" style={{color:isOver100?"#f87171":isOver80?"#fbbf24":selectedCard.color, fontFamily:"Syne"}}>{fmt(cardData.total)}</span>
+              </div>
+              <div className="h-3 bg-slate-800 rounded-full overflow-hidden mb-1">
+                <div className="h-full rounded-full transition-all duration-700"
+                  style={{width:`${usedPct}%`, background:isOver100?"#f87171":isOver80?"#fbbf24":selectedCard.color}}/>
+              </div>
+              <div className="flex justify-between text-xs text-slate-500 mb-4">
+                <span>{usedPct.toFixed(1)}% utilizado</span>
+                <span>Disponível: <span className="text-green-400 font-semibold">{fmt(Math.max(cardData.available,0))}</span></span>
+              </div>
+
+              {isOver100 && <div className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg p-2 mb-4">🚨 Limite ultrapassado! Revise seus gastos.</div>}
+              {isOver80 && !isOver100 && <div className="text-xs text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 rounded-lg p-2 mb-4">⚠️ Você usou mais de 80% do limite do cartão.</div>}
+
+              {/* Transactions List */}
+              {cardData.transactions.length === 0 ? (
+                <p className="text-slate-500 text-sm text-center py-6">Nenhum lançamento neste mês</p>
+              ) : (
+                <div className="space-y-2">
+                  {cardData.transactions.map(tx => (
+                    <div key={tx.id} className="flex items-center gap-3 p-3 rounded-xl" style={{background:"rgba(255,255,255,0.03)"}}>
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{background:`${CATEGORY_COLORS[tx.category]||"#94a3b8"}20`}}>💳</div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-medium truncate">{tx.description||tx.category}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="tag" style={{background:`${CATEGORY_COLORS[tx.category]||"#94a3b8"}20`,color:CATEGORY_COLORS[tx.category]||"#94a3b8"}}>{tx.category}</span>
+                          <span className="text-xs text-slate-500">{new Date(tx.date+"T00:00:00").toLocaleDateString("pt-BR")}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-sm text-red-400" style={{fontFamily:"Syne"}}>-{fmt(tx.amount)}</p>
+                        <button onClick={()=>handleDeleteTx(tx.id)} className="w-6 h-6 rounded flex items-center justify-center text-slate-600 hover:text-red-400 transition-colors text-xs">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          {loadingCard && <div className="text-center py-6"><p className="text-slate-400 text-sm">Carregando...</p></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Goals Tab ─────────────────────────────────────────────────────────────────
 function GoalsTab() {
   const [goals,setGoals]=useState([]); const [showForm,setShowForm]=useState(false);
@@ -670,6 +902,7 @@ export default function App() {
   const navItems=[
     {id:"dashboard",icon:"◈",label:"Dashboard"},
     {id:"transactions",icon:"⟳",label:"Transações"},
+    {id:"cards",icon:"💳",label:"Cartões"},
     {id:"goals",icon:"🎯",label:"Metas"},
     {id:"alerts",icon:"🔔",label:"Alertas"},
     {id:"insights",icon:"◎",label:"Insights"},
@@ -833,6 +1066,7 @@ export default function App() {
             </div>
           )}
 
+          {activeTab==="cards"&&<CardsTab/>}
           {activeTab==="goals"&&<GoalsTab/>}
           {activeTab==="alerts"&&<AlertsTab summary={summary}/>}
 

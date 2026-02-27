@@ -31,6 +31,8 @@ async function initDb() {
   db.run(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, name TEXT NOT NULL);`);
   db.run(`CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount REAL NOT NULL, category TEXT NOT NULL, description TEXT, date TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'expense', created_at TEXT DEFAULT (datetime('now')));`);
   db.run(`CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, title TEXT NOT NULL, target_amount REAL NOT NULL, current_amount REAL NOT NULL DEFAULT 0, category TEXT, deadline TEXT, created_at TEXT DEFAULT (datetime('now')));`);
+  db.run(`CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, name TEXT NOT NULL, limit_amount REAL NOT NULL, closing_day INTEGER NOT NULL, due_day INTEGER NOT NULL, color TEXT DEFAULT '#818cf8', created_at TEXT DEFAULT (datetime('now')));`);
+  db.run(`CREATE TABLE IF NOT EXISTS card_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, card_id INTEGER NOT NULL, amount REAL NOT NULL, category TEXT NOT NULL, description TEXT, date TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')));`);
   db.run(`CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT DEFAULT (datetime('now')));`);
 
   const existing = db.exec("SELECT id FROM users WHERE email = 'demo@mindmoney.com'");
@@ -244,6 +246,59 @@ app.delete("/api/alerts/:id", auth, (req,res) => {
   if (!dbGet("SELECT id FROM alerts WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
     return res.status(404).json({error:"Alerta não encontrado"});
   dbRun("DELETE FROM alerts WHERE id = ?", [req.params.id]);
+  res.json({success:true});
+});
+
+
+// ── Credit Cards ──────────────────────────────────────────────────────────────
+app.get("/api/cards", auth, (req,res) => {
+  res.json(dbAll("SELECT * FROM cards WHERE user_id = ? ORDER BY created_at DESC", [req.user.id]));
+});
+
+app.post("/api/cards", auth, (req,res) => {
+  const {name, limit_amount, closing_day, due_day, color} = req.body;
+  if (!name||!limit_amount||!closing_day||!due_day) return res.status(400).json({error:"Campos obrigatórios faltando"});
+  const id = dbRun("INSERT INTO cards (user_id,name,limit_amount,closing_day,due_day,color) VALUES (?,?,?,?,?,?)",
+    [req.user.id, name, parseFloat(limit_amount), parseInt(closing_day), parseInt(due_day), color||"#818cf8"]);
+  res.status(201).json(dbGet("SELECT * FROM cards WHERE id = ?", [id]));
+});
+
+app.delete("/api/cards/:id", auth, (req,res) => {
+  if (!dbGet("SELECT id FROM cards WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]))
+    return res.status(404).json({error:"Cartão não encontrado"});
+  dbRun("DELETE FROM cards WHERE id = ?", [req.params.id]);
+  dbRun("DELETE FROM card_transactions WHERE card_id = ?", [req.params.id]);
+  res.json({success:true});
+});
+
+app.get("/api/cards/:id/transactions", auth, (req,res) => {
+  const { month } = req.query;
+  const card = dbGet("SELECT * FROM cards WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
+  if (!card) return res.status(404).json({error:"Cartão não encontrado"});
+  let sql = "SELECT * FROM card_transactions WHERE card_id = ?";
+  const params = [req.params.id];
+  if (month) { sql += " AND strftime('%Y-%m', date) = ?"; params.push(month); }
+  sql += " ORDER BY date DESC";
+  const transactions = dbAll(sql, params);
+  const total = transactions.reduce((s,t) => s + t.amount, 0);
+  const available = card.limit_amount - total;
+  res.json({ card, transactions, total, available });
+});
+
+app.post("/api/cards/:id/transactions", auth, (req,res) => {
+  const {amount, category, description, date} = req.body;
+  if (!amount||!category||!date) return res.status(400).json({error:"Campos obrigatórios faltando"});
+  const card = dbGet("SELECT * FROM cards WHERE id = ? AND user_id = ?", [req.params.id, req.user.id]);
+  if (!card) return res.status(404).json({error:"Cartão não encontrado"});
+  const id = dbRun("INSERT INTO card_transactions (card_id,amount,category,description,date) VALUES (?,?,?,?,?)",
+    [req.params.id, parseFloat(amount), category, description||"", date]);
+  res.status(201).json(dbGet("SELECT * FROM card_transactions WHERE id = ?", [id]));
+});
+
+app.delete("/api/cards/:cardId/transactions/:id", auth, (req,res) => {
+  const card = dbGet("SELECT id FROM cards WHERE id = ? AND user_id = ?", [req.params.cardId, req.user.id]);
+  if (!card) return res.status(404).json({error:"Cartão não encontrado"});
+  dbRun("DELETE FROM card_transactions WHERE id = ? AND card_id = ?", [req.params.id, req.params.cardId]);
   res.json({success:true});
 });
 
