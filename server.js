@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const initSqlJs = require("sql.js");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
@@ -27,11 +27,16 @@ async function initDb() {
   } else {
     db = new SQL.Database();
   }
+
   db.run(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, name TEXT NOT NULL);`);
   db.run(`CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, amount REAL NOT NULL, category TEXT NOT NULL, description TEXT, date TEXT NOT NULL, type TEXT NOT NULL DEFAULT 'expense', created_at TEXT DEFAULT (datetime('now')));`);
+  db.run(`CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, title TEXT NOT NULL, target_amount REAL NOT NULL, current_amount REAL NOT NULL DEFAULT 0, category TEXT, deadline TEXT, created_at TEXT DEFAULT (datetime('now')));`);
+  db.run(`CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, category TEXT NOT NULL, limit_amount REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT DEFAULT (datetime('now')));`);
+
   const existing = db.exec("SELECT id FROM users WHERE email = 'demo@mindmoney.com'");
   if (!existing.length || !existing[0].values.length) {
     db.run("INSERT INTO users (email, password, name) VALUES ('demo@mindmoney.com', 'demo123', 'Demo User')");
+    saveDb();
     const res = db.exec("SELECT id FROM users WHERE email = 'demo@mindmoney.com'");
     const uid = res[0].values[0][0];
     [
@@ -43,7 +48,17 @@ async function initDb() {
       [uid,200,"Saúde","Plano de saúde","2024-01-20","expense"],
       [uid,500,"Freelance","Projeto extra","2024-01-22","income"],
       [uid,60,"Educação","Curso online","2024-01-25","expense"],
-    ].forEach(s => db.run(`INSERT INTO transactions (user_id,amount,category,description,date,type) VALUES (${s[0]},${s[1]},'${s[2]}','${s[3]}','${s[4]}','${s[5]}')`));
+      [uid,3500,"Salário","Salário mensal","2024-02-05","income"],
+      [uid,890,"Moradia","Aluguel","2024-02-10","expense"],
+      [uid,450,"Alimentação","Supermercado","2024-02-14","expense"],
+      [uid,200,"Lazer","Show","2024-02-20","expense"],
+      [uid,3500,"Salário","Salário mensal","2024-03-05","income"],
+      [uid,890,"Moradia","Aluguel","2024-03-10","expense"],
+      [uid,280,"Alimentação","Supermercado","2024-03-15","expense"],
+      [uid,120,"Transporte","Uber","2024-03-18","expense"],
+    ].forEach(s => {
+      db.run(`INSERT INTO transactions (user_id,amount,category,description,date,type) VALUES (${s[0]},${s[1]},'${s[2]}','${s[3]}','${s[4]}','${s[5]}')`);
+    });
   }
   saveDb();
 }
@@ -77,6 +92,7 @@ function auth(req, res, next) {
   catch { return res.status(401).json({error:"Token inválido"}); }
 }
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
 app.post("/api/auth/login", (req,res) => {
   const {email,password} = req.body;
   if (!email||!password) return res.status(400).json({error:"Email e senha obrigatórios"});
@@ -95,8 +111,17 @@ app.post("/api/auth/register", (req,res) => {
   res.status(201).json({token, user:{id,email,name}});
 });
 
+// ── Transactions (com filtro por período) ─────────────────────────────────────
 app.get("/api/transactions", auth, (req,res) => {
-  res.json(dbAll("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC", [req.user.id]));
+  const { startDate, endDate, type, category } = req.query;
+  let sql = "SELECT * FROM transactions WHERE user_id = ?";
+  const params = [req.user.id];
+  if (startDate) { sql += " AND date >= ?"; params.push(startDate); }
+  if (endDate)   { sql += " AND date <= ?"; params.push(endDate); }
+  if (type)      { sql += " AND type = ?";  params.push(type); }
+  if (category)  { sql += " AND category = ?"; params.push(category); }
+  sql += " ORDER BY date DESC";
+  res.json(dbAll(sql, params));
 });
 
 app.post("/api/transactions", auth, (req,res) => {
@@ -114,8 +139,15 @@ app.delete("/api/transactions/:id", auth, (req,res) => {
   res.json({success:true});
 });
 
+// ── Summary (com filtro por período) ─────────────────────────────────────────
 app.get("/api/summary", auth, (req,res) => {
-  const txs = dbAll("SELECT * FROM transactions WHERE user_id = ?", [req.user.id]);
+  const { startDate, endDate } = req.query;
+  let sql = "SELECT * FROM transactions WHERE user_id = ?";
+  const params = [req.user.id];
+  if (startDate) { sql += " AND date >= ?"; params.push(startDate); }
+  if (endDate)   { sql += " AND date <= ?"; params.push(endDate); }
+
+  const txs = dbAll(sql, params);
   const totalIncome   = txs.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
   const totalExpenses = txs.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
   const balance = totalIncome - totalExpenses;
@@ -136,6 +168,54 @@ app.get("/api/summary", auth, (req,res) => {
   else if (savingsRate>=20) insight={type:"positive",title:"🎉 Parabéns!",message:`Poupando ${savingsRate.toFixed(1)}% da renda. Excelente! Considere investir o excedente.`};
   else insight={type:"info",title:"📊 Comportamento Estável",message:`Taxa de poupança: ${savingsRate.toFixed(1)}%. Pode melhorar reduzindo gastos com "${top?.name||"supérfluos"}".`};
   res.json({totalIncome,totalExpenses,balance,categoryData,monthlyData,insight});
+});
+
+// ── Goals ─────────────────────────────────────────────────────────────────────
+app.get("/api/goals", auth, (req,res) => {
+  res.json(dbAll("SELECT * FROM goals WHERE user_id = ? ORDER BY created_at DESC", [req.user.id]));
+});
+
+app.post("/api/goals", auth, (req,res) => {
+  const {title,target_amount,category,deadline} = req.body;
+  if (!title||!target_amount) return res.status(400).json({error:"Título e valor são obrigatórios"});
+  const id = dbRun("INSERT INTO goals (user_id,title,target_amount,category,deadline) VALUES (?,?,?,?,?)",
+    [req.user.id,parseFloat(target_amount),title,category||"",deadline||""]);
+  res.status(201).json(dbGet("SELECT * FROM goals WHERE id = ?", [id]));
+});
+
+app.patch("/api/goals/:id", auth, (req,res) => {
+  const {current_amount} = req.body;
+  if (!dbGet("SELECT id FROM goals WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
+    return res.status(404).json({error:"Meta não encontrada"});
+  dbRun("UPDATE goals SET current_amount = ? WHERE id = ?", [parseFloat(current_amount),req.params.id]);
+  res.json(dbGet("SELECT * FROM goals WHERE id = ?", [req.params.id]));
+});
+
+app.delete("/api/goals/:id", auth, (req,res) => {
+  if (!dbGet("SELECT id FROM goals WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
+    return res.status(404).json({error:"Meta não encontrada"});
+  dbRun("DELETE FROM goals WHERE id = ?", [req.params.id]);
+  res.json({success:true});
+});
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+app.get("/api/alerts", auth, (req,res) => {
+  res.json(dbAll("SELECT * FROM alerts WHERE user_id = ? ORDER BY created_at DESC", [req.user.id]));
+});
+
+app.post("/api/alerts", auth, (req,res) => {
+  const {category,limit_amount} = req.body;
+  if (!category||!limit_amount) return res.status(400).json({error:"Categoria e limite são obrigatórios"});
+  const id = dbRun("INSERT INTO alerts (user_id,category,limit_amount) VALUES (?,?,?)",
+    [req.user.id,category,parseFloat(limit_amount)]);
+  res.status(201).json(dbGet("SELECT * FROM alerts WHERE id = ?", [id]));
+});
+
+app.delete("/api/alerts/:id", auth, (req,res) => {
+  if (!dbGet("SELECT id FROM alerts WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
+    return res.status(404).json({error:"Alerta não encontrado"});
+  dbRun("DELETE FROM alerts WHERE id = ?", [req.params.id]);
+  res.json({success:true});
 });
 
 initDb().then(() => app.listen(PORT, () => console.log(`✅ MindMoney API rodando em http://localhost:${PORT}`)));
