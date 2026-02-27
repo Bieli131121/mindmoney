@@ -1126,6 +1126,62 @@ function AlertsTab({ summary }) {
   );
 }
 
+
+// ── Mobile Nav ────────────────────────────────────────────────────────────────
+function MobileNav({ navItems, activeTab, setActiveTab, isDark }) {
+  const [showMore, setShowMore] = useState(false);
+  const mainTabs = navItems.slice(0, 4); // Dashboard, Transações, Cartões, Recorrentes
+  const moreTabs = navItems.slice(4);    // Comparativo, Categorias, Metas, Alertas, Insights, Perfil
+
+  const isMoreActive = moreTabs.some(t => t.id === activeTab);
+
+  return (
+    <>
+      {/* More menu overlay */}
+      {showMore && (
+        <div className="fixed inset-0 z-30" onClick={() => setShowMore(false)}>
+          <div className="fixed bottom-20 left-4 right-4 z-40 rounded-2xl p-3 border"
+            style={{background:isDark?"rgba(10,15,30,0.98)":"rgba(240,253,244,0.98)",borderColor:"rgba(74,222,128,0.2)",backdropFilter:"blur(20px)"}}
+            onClick={e=>e.stopPropagation()}>
+            <div className="grid grid-cols-3 gap-2">
+              {moreTabs.map(item=>(
+                <button key={item.id} onClick={()=>{setActiveTab(item.id);setShowMore(false);}}
+                  className="flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all"
+                  style={{background:activeTab===item.id?"rgba(74,222,128,0.15)":"rgba(255,255,255,0.04)",color:activeTab===item.id?"#4ade80":isDark?"#94a3b8":"#475569"}}>
+                  <span className="text-2xl">{item.icon}</span>
+                  <span className="text-xs font-medium" style={{fontFamily:"DM Sans"}}>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bottom bar */}
+      <div className="fixed bottom-0 left-0 right-0 md:hidden z-20 border-t"
+        style={{borderColor:"rgba(255,255,255,0.05)",background:isDark?"rgba(5,8,16,0.97)":"rgba(240,253,244,0.97)",backdropFilter:"blur(12px)",paddingBottom:"env(safe-area-inset-bottom)"}}>
+        <div className="flex items-center h-16">
+          {mainTabs.map(item=>(
+            <button key={item.id} onClick={()=>{setActiveTab(item.id);setShowMore(false);}}
+              className="flex-1 flex flex-col items-center gap-1 py-2 transition-colors"
+              style={{color:activeTab===item.id?"#4ade80":"#475569"}}>
+              <span className="text-xl">{item.icon}</span>
+              <span className="text-[10px] font-medium" style={{fontFamily:"DM Sans"}}>{item.label}</span>
+            </button>
+          ))}
+          {/* More button */}
+          <button onClick={()=>setShowMore(!showMore)}
+            className="flex-1 flex flex-col items-center gap-1 py-2 transition-colors"
+            style={{color:isMoreActive||showMore?"#4ade80":"#475569"}}>
+            <span className="text-xl">{showMore?"✕":"⋯"}</span>
+            <span className="text-[10px] font-medium" style={{fontFamily:"DM Sans"}}>{isMoreActive ? moreTabs.find(t=>t.id===activeTab)?.label : "Mais"}</span>
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App() {
   const [user,setUser]=useState(null); const [initialized,setInitialized]=useState(false);
@@ -1295,18 +1351,7 @@ export default function App() {
           </div>
 
           {/* Mobile bottom nav */}
-          <div className="fixed bottom-0 left-0 right-0 md:hidden z-20 border-t" style={{borderColor:"rgba(255,255,255,0.05)",background:isDark?"rgba(5,8,16,0.95)":"rgba(240,253,244,0.97)",backdropFilter:"blur(12px)"}}>
-            <div className="flex">
-              {navItems.map(item=>(
-                <button key={item.id} onClick={()=>setActiveTab(item.id)}
-                  className="flex-1 flex flex-col items-center gap-1 py-2 text-xs transition-colors"
-                  style={{color:activeTab===item.id?"#4ade80":"#475569"}}>
-                  <span className="text-base">{item.icon}</span>
-                  <span className="text-[10px]">{item.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <MobileNav navItems={navItems} activeTab={activeTab} setActiveTab={setActiveTab} isDark={isDark}/>
 
           {/* DASHBOARD */}
           {activeTab==="dashboard"&&(
