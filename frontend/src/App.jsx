@@ -245,6 +245,80 @@ function AddTransactionModal({ onClose, onAdd }) {
   );
 }
 
+
+// ── Edit Transaction Modal ────────────────────────────────────────────────────
+function EditTransactionModal({ transaction, onClose, onSave }) {
+  const [form, setForm] = useState({
+    type: transaction.type,
+    amount: transaction.amount,
+    category: transaction.category,
+    description: transaction.description || "",
+    date: transaction.date,
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const categories = form.type === "expense" ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.amount || parseFloat(form.amount) <= 0) { setError("Informe um valor válido"); return; }
+    setLoading(true); setError("");
+    try {
+      const { data } = await api.patch(`/api/transactions/${transaction.id}`, form);
+      onSave(data); onClose();
+    } catch(err) { setError(err.response?.data?.error || "Erro ao salvar"); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{background:"rgba(5,8,16,0.85)",backdropFilter:"blur(8px)"}}
+      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="glass-card p-6 w-full max-w-md animate-fade-up">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-bold text-white">✏️ Editar Transação</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors">✕</button>
+        </div>
+        <div className="flex gap-2 mb-5">
+          {["expense","income"].map(t => (
+            <button key={t} onClick={() => setForm({...form, type:t, category:t==="expense"?"Alimentação":"Salário"})}
+              className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all duration-200 border"
+              style={{fontFamily:"Syne", background:form.type===t?(t==="expense"?"rgba(248,113,113,0.15)":"rgba(74,222,128,0.15)"):"transparent", borderColor:form.type===t?(t==="expense"?"rgba(248,113,113,0.5)":"rgba(74,222,128,0.5)"):"rgba(148,163,184,0.15)", color:form.type===t?(t==="expense"?"#f87171":"#4ade80"):"#64748b"}}>
+              {t==="expense"?"💸 Gasto":"💰 Receita"}
+            </button>
+          ))}
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="label">Valor (R$)</label>
+              <input className="input-field" type="number" step="0.01" min="0.01" value={form.amount}
+                onChange={e=>setForm({...form,amount:e.target.value})} required/>
+            </div>
+            <div><label className="label">Data</label>
+              <input className="input-field" type="date" value={form.date}
+                onChange={e=>setForm({...form,date:e.target.value})} required/>
+            </div>
+          </div>
+          <div><label className="label">Categoria</label>
+            <select className="input-field" value={form.category} onChange={e=>setForm({...form,category:e.target.value})}>
+              {categories.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div><label className="label">Descrição</label>
+            <input className="input-field" placeholder="Ex: Supermercado Extra" value={form.description}
+              onChange={e=>setForm({...form,description:e.target.value})}/>
+          </div>
+          {error && <div className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-lg p-3">{error}</div>}
+          <div className="flex gap-3 pt-1">
+            <button type="button" className="btn-ghost flex-1" onClick={onClose}>Cancelar</button>
+            <button type="submit" className="btn-primary flex-1" disabled={loading}>{loading?"Salvando...":"Salvar"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Period Filter ─────────────────────────────────────────────────────────────
 function PeriodFilter({ filters, onChange }) {
   const presets=[{label:"Este mês",value:"thisMonth"},{label:"Mês passado",value:"lastMonth"},{label:"3 meses",value:"last3"},{label:"Este ano",value:"thisYear"},{label:"Tudo",value:"all"}];
@@ -537,6 +611,8 @@ export default function App() {
   const [activeTab,setActiveTab]=useState("dashboard"); const [showModal,setShowModal]=useState(false);
   const [loadingData,setLoadingData]=useState(false);
   const [filters,setFilters]=useState({startDate:"",endDate:"",preset:"all"});
+  const [search,setSearch]=useState("");
+  const [editingTx,setEditingTx]=useState(null);
   const [theme,setTheme]=useState(()=>localStorage.getItem("mm_theme")||"dark");
   const [notifications,setNotifications]=useState([]);
 
@@ -607,6 +683,7 @@ export default function App() {
       {isDark&&<><div className="glow-bg"/><div className="glow-bg-2"/></>}
       <NotificationToast notifications={notifications} onDismiss={i=>setNotifications(p=>p.filter((_,idx)=>idx!==i))}/>
       {showModal&&<AddTransactionModal onClose={()=>setShowModal(false)} onAdd={fetchData}/>}
+      {editingTx&&<EditTransactionModal transaction={editingTx} onClose={()=>setEditingTx(null)} onSave={()=>{setEditingTx(null);fetchData();}}/>}
 
       <div className="flex min-h-screen relative z-10">
         {/* Sidebar */}
@@ -724,11 +801,17 @@ export default function App() {
                 </div>
               </div>
               <PeriodFilter filters={filters} onChange={setFilters}/>
+              {/* Search Bar */}
+              <div className="relative mb-4">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">🔍</span>
+                <input className="input-field pl-9" placeholder="Buscar por descrição ou categoria..." value={search} onChange={e=>setSearch(e.target.value)}/>
+                {search && <button onClick={()=>setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs">✕</button>}
+              </div>
               {loadingData?(<div className="space-y-3">{[0,1,2,3].map(i=><div key={i} className="glass-card h-16 animate-pulse"/>)}</div>):transactions.length===0?(
                 <div className="glass-card p-10 text-center animate-fade-up"><p className="text-4xl mb-3">📭</p><p className="font-semibold" style={{color:isDark?"white":"#0f172a"}}>Nenhuma transação no período</p></div>
               ):(
                 <div className="space-y-2 animate-fade-up">
-                  {transactions.map(tx=>(
+                  {transactions.filter(tx => !search || (tx.description||"").toLowerCase().includes(search.toLowerCase()) || tx.category.toLowerCase().includes(search.toLowerCase())).map(tx=>(
                     <div key={tx.id} className="glass-card glass-card-hover p-4 flex items-center gap-4" style={{background:isDark?undefined:"rgba(255,255,255,0.8)"}}>
                       <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0" style={{background:`${CATEGORY_COLORS[tx.category]||"#94a3b8"}20`}}>{tx.type==="income"?"💰":"💸"}</div>
                       <div className="flex-1 min-w-0">
@@ -740,7 +823,8 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <p className="font-bold text-base" style={{fontFamily:"Syne",color:tx.type==="income"?"#4ade80":"#f87171"}}>{tx.type==="income"?"+":"-"}{fmt(tx.amount)}</p>
-                        <button onClick={()=>handleDelete(tx.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-600 hover:text-red-400 hover:bg-red-400/10 transition-colors text-sm">✕</button>
+                        <button onClick={()=>setEditingTx(tx)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-blue-400 hover:bg-blue-400/10 transition-colors text-sm" title="Editar">✏️</button>
+                        <button onClick={()=>handleDelete(tx.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-600 hover:text-red-400 hover:bg-red-400/10 transition-colors text-sm" title="Excluir">✕</button>
                       </div>
                     </div>
                   ))}

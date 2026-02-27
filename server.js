@@ -157,6 +157,16 @@ app.post("/api/transactions", auth, (req,res) => {
   res.status(201).json(dbGet("SELECT * FROM transactions WHERE id = ?", [id]));
 });
 
+
+app.patch("/api/transactions/:id", auth, (req,res) => {
+  const {amount,category,description,date,type} = req.body;
+  if (!dbGet("SELECT id FROM transactions WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
+    return res.status(404).json({error:"Transação não encontrada"});
+  dbRun("UPDATE transactions SET amount=?,category=?,description=?,date=?,type=? WHERE id=?",
+    [parseFloat(amount),category,description||"",date,type||"expense",req.params.id]);
+  res.json(dbGet("SELECT * FROM transactions WHERE id = ?", [req.params.id]));
+});
+
 app.delete("/api/transactions/:id", auth, (req,res) => {
   if (!dbGet("SELECT id FROM transactions WHERE id = ? AND user_id = ?", [req.params.id,req.user.id]))
     return res.status(404).json({error:"Não encontrada"});
